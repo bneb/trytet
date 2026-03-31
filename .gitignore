@@ -1,10 +1,8 @@
-/target
-/Cargo.lock
-# macOS
+target/
+Cargo.lock
+**/*.rs.bk
 .DS_Store
-# Emacs/Vim
 *~
 *.swp
-# IDEs
 .idea/
 .vscode/
