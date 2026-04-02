@@ -66,7 +66,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/tet/infer/{alias}", post(handle_infer))
         .route("/v1/topology", axum::routing::get(handle_topology))
         .route("/v1/swarm/up", post(handle_swarm_up))
-        .route("/health", axum::routing::get(handle_health))
+        .route("/health", axum::routing::get(crate::server::health::handle_health))
         .layer(DefaultBodyLimit::max(1024 * 1024 * 50)) // 50MB limit
         .with_state(state)
 }
@@ -171,6 +171,14 @@ async fn handle_execute(
                 "error_type": "bad_request"
             })),
         ));
+    }
+    let mut req = req;
+    if req.egress_policy.is_none() {
+        req.egress_policy = Some(crate::oracle::EgressPolicy {
+            allowed_domains: vec![],
+            max_daily_bytes: 0,
+            require_https: true,
+        });
     }
 
     match state.sandbox.execute(req).await {

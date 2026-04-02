@@ -1,0 +1,21 @@
+app = "trytet-api"
+primary_region = "sea"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "trytet_data"
+  destination = "/data"
+
+[env]
+  DATABASE_URL = "sqlite:///data/trytet.db"
+  REGISTRY_PATH = "/data/registry"
+  BASE_TET_PATH = "/data/base_tets"

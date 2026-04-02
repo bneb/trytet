@@ -44,3 +44,5 @@ pub mod registry;
 pub mod sandbox;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod studio;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod server;

@@ -12,8 +12,12 @@ pub struct LocalRegistry {
 
 impl LocalRegistry {
     pub fn new() -> anyhow::Result<Self> {
-        let home_dir = home::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let storage_dir = home_dir.join(".trytet").join("registry");
+        let storage_dir = std::env::var("REGISTRY_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                let home_dir = home::home_dir().unwrap_or_else(|| PathBuf::from("."));
+                home_dir.join(".trytet").join("registry")
+            });
         
         if !storage_dir.exists() {
             fs::create_dir_all(&storage_dir)?;

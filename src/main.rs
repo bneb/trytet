@@ -20,6 +20,22 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Tet Core Engine starting...");
 
+    // -- Self-Healing Boot: Ensure Persistent Volume Mounts Exist -----------------
+    if let Ok(registry_path) = std::env::var("REGISTRY_PATH") {
+        std::fs::create_dir_all(&registry_path).ok();
+    }
+    if let Ok(base_path) = std::env::var("BASE_TET_PATH") {
+        std::fs::create_dir_all(&base_path).ok();
+    }
+    if let Ok(db_url) = std::env::var("DATABASE_URL") {
+        if db_url.starts_with("sqlite://") {
+            let path_str = db_url.replace("sqlite://", "");
+            if let Some(parent) = std::path::Path::new(&path_str).parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+        }
+    }
+
     // -- Initialize the pre-warmed sandbox, Hive Peers, and Tet-Mesh -------------------------
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers.clone());
@@ -41,6 +57,9 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!("Hive Server failed: {}", e);
         }
     });
+
+    // Spawn zero-residue purger
+    tet_core::server::purge::spawn_purge_thread().await;
 
     // -- Spawn the Tet-Mesh worker to route Inter-Tet RPC calls -----------------
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
