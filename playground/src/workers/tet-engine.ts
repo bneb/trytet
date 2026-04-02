@@ -20,41 +20,13 @@ self.onmessage = async (e: MessageEvent) => {
       self.postMessage({ type: 'ERROR', error: 'Engine not initialized' });
       return;
     }
-    
+
     try {
       const { payload } = e.data; // Expected to be Uint8Array
-      const result = await engine.import_snapshot(payload);
-      self.postMessage({ type: 'LOG', data: `Snapshot hydration verified. Resuming 51 execution threads.` });
-
-      // Start the simulated execution event loop 
-      let tick = 0;
-      const agentTasks = [
-        "Computing proof witness",
-        "Validating topological edge",
-        "Resolving state conflict",
-        "Executing localized inference",
-        "Committing state to ledger",
-        "Verifying cryptosignature",
-        "Allocating memory bounds",
-      ];
-
-      setInterval(() => {
-        tick++;
-        const targetAgent = Math.floor(Math.random() * 51) + 1;
-        const taskIndex = Math.floor(Math.random() * agentTasks.length);
-        const task = agentTasks[taskIndex];
-        const latency = (Math.random() * 0.5 + 0.1).toFixed(3);
-        
-        // Log the active interaction
-        self.postMessage({ type: 'LOG', data: `[Agent-${targetAgent}] ${task} ... ${latency}ms` });
-
-        // Periodically simulate a distributed consensus interaction
-        if (tick % 7 === 0) {
-            const peerAgent = Math.floor(Math.random() * 51) + 1;
-            self.postMessage({ type: 'LOG', data: `[Consensus] Agent-${targetAgent} synchronized state with Agent-${peerAgent} (Zero-copy payload)` });
-        }
-      }, 800);
-
+      // Use the real snapshot_state/restore_state bridge for round-trip proof
+      const snapshot = engine.snapshot_state(payload);
+      const restored = engine.restore_state(snapshot);
+      self.postMessage({ type: 'LOG', data: `Snapshot round-trip verified. ${snapshot.length} bytes serialized via bincode.` });
     } catch (err) {
       self.postMessage({ type: 'ERROR', error: String(err) });
     }
