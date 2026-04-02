@@ -308,40 +308,97 @@ export default function WebDemoPage() {
 
     const sorted = [...agents].sort((a, b) => (b.wins * 3 + b.draws) - (a.wins * 3 + a.draws));
     const aliveCount = agents.filter(a => !a.eliminated).length;
+    const maxRound = 34;
 
     return (
         <div className="flex flex-col min-h-screen relative overflow-x-hidden">
             <Navbar />
 
-            <div className="w-full flex justify-center">
-                <header className="pt-20 pb-10 px-10 w-full max-w-[1000px]">
-                    <div className="flex items-center gap-3 mb-4 flex-wrap">
-                        <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: running ? '#34C759' : '#8E8E93' }} />
-                        <span className="font-mono text-xs text-[var(--text-sub)] tracking-widest uppercase">
-                            {running ? 'Tournament Active' : activeSnapshotId !== null ? `Restored → Snapshot #${activeSnapshotId}` : 'Ready'}
-                        </span>
+            {/* SUBWAY TIMELINE — sticky bar below nav */}
+            <div style={{
+                position: 'sticky', top: 56, zIndex: 90,
+                background: 'var(--nav-bg)',
+                backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+                borderBottom: '1px solid var(--card-border)',
+                padding: '0 40px',
+            }}>
+                <div style={{ maxWidth: 1000, margin: '0 auto', padding: '12px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-sub)', whiteSpace: 'nowrap', minWidth: 48 }}>
+                        R{round}
+                    </div>
+
+                    <div style={{ flex: 1, position: 'relative', height: 24, display: 'flex', alignItems: 'center' }}>
+                        {/* Track */}
+                        <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 3, borderRadius: 2, background: 'var(--card-border)', transform: 'translateY(-50%)' }} />
+                        {/* Progress fill */}
+                        <div style={{
+                            position: 'absolute', left: 0, top: '50%', height: 3, borderRadius: 2,
+                            background: 'linear-gradient(90deg, #007AFF, #AF52DE)',
+                            width: `${Math.min(100, (round / maxRound) * 100)}%`,
+                            transform: 'translateY(-50%)',
+                            transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                        }} />
+                        {/* Station dots */}
+                        {snapshots.map((snap) => {
+                            const pct = Math.min(100, (snap.round / maxRound) * 100);
+                            const isActive = activeSnapshotId === snap.id;
+                            return (
+                                <button key={snap.id} onClick={() => restoreSnapshot(snap)}
+                                    title={`${snap.label} · ${snap.blobSize}B · ${snap.serializeMs.toFixed(2)}ms`}
+                                    style={{
+                                        position: 'absolute', left: `${pct}%`, transform: 'translate(-50%, -50%)', top: '50%',
+                                        width: isActive ? 18 : 12, height: isActive ? 18 : 12, borderRadius: '50%',
+                                        background: isActive ? '#007AFF' : 'var(--bg-secondary)',
+                                        border: isActive ? '3px solid rgba(0,122,255,0.4)' : '2px solid var(--text-sub)',
+                                        cursor: 'pointer', zIndex: 3, padding: 0,
+                                        transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                                        boxShadow: isActive ? '0 0 10px rgba(0,122,255,0.5)' : 'none',
+                                    }}
+                                />
+                            );
+                        })}
+                        {/* Current position */}
+                        <div style={{
+                            position: 'absolute', left: `${Math.min(100, (round / maxRound) * 100)}%`,
+                            transform: 'translate(-50%, -50%)', top: '50%',
+                            width: 8, height: 8, borderRadius: '50%',
+                            background: running ? '#34C759' : '#8E8E93', zIndex: 4,
+                            transition: 'left 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                            boxShadow: running ? '0 0 8px rgba(52,199,89,0.6)' : 'none',
+                        }} />
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
                         {branchCount > 0 && (
-                            <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'rgba(0,122,255,0.15)', color: '#007AFF' }}>
-                                Branch #{branchCount}
+                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(0,122,255,0.15)', color: '#007AFF' }}>
+                                ⑂ {branchCount}
                             </span>
                         )}
-                        <span className="font-mono text-xs px-2 py-0.5 rounded ml-auto" style={{
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--text-sub)' }}>
+                            {snapshots.length > 0 ? `${snapshots.length} snap${snapshots.length > 1 ? 's' : ''}` : ''}
+                        </span>
+                        <span style={{
+                            fontFamily: "'JetBrains Mono', monospace", fontSize: 10, padding: '2px 6px', borderRadius: 4,
                             background: wasmReady ? 'rgba(52,199,89,0.12)' : 'rgba(255,69,58,0.12)',
                             color: wasmReady ? '#34C759' : '#FF453A',
                         }}>
-                            {wasmReady ? '● Wasm + Bincode Active' : '○ Wasm Loading...'}
+                            {wasmReady ? '●' : '○'} wasm
                         </span>
                     </div>
+                </div>
+            </div>
+
+            {/* HEADER */}
+            <div className="w-full flex justify-center">
+                <header className="pt-12 pb-8 px-10 w-full max-w-[1000px]">
                     <h1 className="text-[clamp(28px,5vw,48px)] font-bold tracking-tight mb-3 leading-[1.1]">
                         Git for running processes.
                     </h1>
                     <p className="text-[16px] text-[var(--text-sub)] max-w-[620px] mb-6">
                         8 agents compete in a live RPS tournament. Every 5 rounds, Trytet serializes their state
                         into a portable <strong style={{ color: 'var(--text-main)' }}>bincode snapshot</strong> via
-                        real WebAssembly. Click any snapshot to <strong style={{ color: 'var(--text-main)' }}>rewind and fork</strong> —
-                        the tournament resumes from that exact binary state, diverging into a new timeline.
+                        real WebAssembly. Click any station on the timeline to <strong style={{ color: 'var(--text-main)' }}>rewind and fork</strong>.
                     </p>
-
                     <div className="flex items-center gap-3 flex-wrap">
                         <button onClick={toggleRun} className="btn" style={{ minWidth: 120 }}>
                             {running ? '⏸ Pause' : '▶ Start'}
@@ -361,9 +418,9 @@ export default function WebDemoPage() {
                 </header>
             </div>
 
+            {/* DASHBOARD GRID */}
             <div className="w-full flex justify-center">
                 <main className="grid grid-cols-12 gap-6 px-5 md:px-10 pb-8 w-full max-w-[1000px]">
-
                     {/* Leaderboard */}
                     <div className="card col-span-12 md:col-span-7 relative" style={{ padding: 0, overflow: 'hidden' }}>
                         <div className="label" style={{ padding: '20px 24px 12px' }}>Leaderboard</div>
@@ -445,87 +502,38 @@ export default function WebDemoPage() {
                             ))}
                         </div>
                     </div>
-
                 </main>
             </div>
 
-            {/* State Timeline + Snapshot Inspector */}
-            <div className="w-full flex justify-center">
-                <div className="px-5 md:px-10 pb-24 w-full max-w-[1000px]">
-                    <div className="card" style={{ padding: '20px 24px' }}>
-                        <div className="label" style={{ marginBottom: 16 }}>State Timeline — Snapshot · Rewind · Fork</div>
-
-                        {snapshots.length === 0 ? (
-                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--text-sub)' }}>
-                                Snapshots appear every 5 rounds. Each one is a real bincode-serialized SnapshotPayload{wasmReady ? ' via WebAssembly' : ''}.
-                            </div>
-                        ) : (
-                            <div>
-                                {/* Timeline bar */}
-                                <div style={{ display: 'flex', alignItems: 'center', position: 'relative', marginBottom: 16 }}>
-                                    <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 2, background: 'var(--card-border)', transform: 'translateY(-50%)' }} />
-                                    {snapshots.map((snap) => (
-                                        <button key={snap.id} onClick={() => restoreSnapshot(snap)}
-                                            title={`Restore to ${snap.label} (${snap.blobSize} bytes, ${snap.serializeMs.toFixed(2)}ms)`}
-                                            style={{
-                                                position: 'relative', flex: 1, display: 'flex', flexDirection: 'column',
-                                                alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0', zIndex: 2,
-                                            }}>
-                                            <div style={{
-                                                width: activeSnapshotId === snap.id ? 16 : 12,
-                                                height: activeSnapshotId === snap.id ? 16 : 12,
-                                                borderRadius: '50%',
-                                                background: activeSnapshotId === snap.id ? '#007AFF' : 'var(--text-sub)',
-                                                border: activeSnapshotId === snap.id ? '3px solid rgba(0,122,255,0.3)' : '2px solid var(--bg-primary)',
-                                                transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-                                                boxShadow: activeSnapshotId === snap.id ? '0 0 12px rgba(0,122,255,0.4)' : 'none',
-                                            }} />
-                                            <span style={{
-                                                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                                                color: activeSnapshotId === snap.id ? '#007AFF' : 'var(--text-sub)',
-                                                marginTop: 6, whiteSpace: 'nowrap',
-                                                fontWeight: activeSnapshotId === snap.id ? 600 : 400,
-                                            }}>{snap.label}</span>
-                                            <span style={{
-                                                fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                                                color: 'var(--text-sub)', opacity: 0.6, marginTop: 2,
-                                            }}>{snap.blobSize}B</span>
-                                        </button>
-                                    ))}
+            {/* SNAPSHOT INSPECTOR */}
+            {selectedSnapshot && (
+                <div className="w-full flex justify-center">
+                    <div className="px-5 md:px-10 pb-16 w-full max-w-[1000px]">
+                        <div style={{
+                            background: 'var(--code-bg)', borderRadius: 8, padding: 20,
+                            border: '1px solid var(--card-border)', fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                                <div style={{ color: '#007AFF', fontWeight: 600, fontSize: 12 }}>
+                                    ⑂ Snapshot #{selectedSnapshot.id} — {selectedSnapshot.label}
                                 </div>
-
-                                {/* Snapshot Inspector */}
-                                {selectedSnapshot && (
-                                    <div style={{
-                                        background: 'var(--code-bg)', borderRadius: 8, padding: 16, marginBottom: 12,
-                                        border: '1px solid var(--card-border)', fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                                    }}>
-                                        <div style={{ color: '#007AFF', fontWeight: 600, marginBottom: 8, fontSize: 12 }}>
-                                            Snapshot #{selectedSnapshot.id} — {selectedSnapshot.label}
-                                        </div>
-                                        <div style={{ color: 'var(--text-sub)', lineHeight: 1.8 }}>
-                                            <div>Format: <span style={{ color: 'var(--text-main)' }}>bincode (SnapshotPayload)</span></div>
-                                            <div>Blob size: <span style={{ color: 'var(--text-main)' }}>{selectedSnapshot.blobSize} bytes</span></div>
-                                            <div>Serialize: <span style={{ color: '#34C759' }}>{selectedSnapshot.serializeMs.toFixed(3)}ms</span></div>
-                                            <div style={{ marginTop: 8, wordBreak: 'break-all', opacity: 0.7, fontSize: 10 }}>
-                                                {selectedSnapshot.blobPreview}
-                                            </div>
-                                            <div style={{ marginTop: 8, color: 'var(--text-sub)', fontSize: 10, fontStyle: 'italic' }}>
-                                                This blob is byte-compatible with POST /v1/tet/import on any Trytet node.
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text-sub)' }}>
-                                    {snapshots.length} snapshot{snapshots.length > 1 ? 's' : ''} ·
-                                    Click any point to rewind and fork into an alternate timeline
+                                <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, color: 'var(--text-sub)' }}>
+                                    <span>Format: <span style={{ color: 'var(--text-main)' }}>bincode</span></span>
+                                    <span>Size: <span style={{ color: 'var(--text-main)' }}>{selectedSnapshot.blobSize}B</span></span>
+                                    <span>Serialized: <span style={{ color: '#34C759' }}>{selectedSnapshot.serializeMs.toFixed(3)}ms</span></span>
                                 </div>
                             </div>
-                        )}
+                            <div style={{ wordBreak: 'break-all', opacity: 0.5, fontSize: 10, lineHeight: 1.6 }}>
+                                {selectedSnapshot.blobPreview}
+                            </div>
+                            <div style={{ marginTop: 8, color: 'var(--text-sub)', fontSize: 10, fontStyle: 'italic' }}>
+                                Byte-compatible with POST /v1/tet/import on any Trytet node.
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 }
+
