@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 export function Navbar() {
   const [isLightMode, setIsLightMode] = useState(false);
@@ -55,9 +56,12 @@ export function Navbar() {
           <div className="w-6 h-6 shrink-0" />
         </div>
         <div className="flex items-center gap-3">
-          <a href="/web-demo" className="text-sm font-semibold tracking-wide hover:text-[var(--text-sub)] transition-colors">
+          <Link href="/how-to" className="text-sm font-semibold tracking-wide hover:text-[var(--text-sub)] transition-colors">
+            How To
+          </Link>
+          <Link href="/web-demo" className="text-sm font-semibold tracking-wide hover:text-[var(--text-sub)] transition-colors">
             Live Demo
-          </a>
+          </Link>
           <a href="https://github.com/bneb/trytet" target="_blank" rel="noreferrer">
             <button className="btn">GitHub</button>
           </a>
