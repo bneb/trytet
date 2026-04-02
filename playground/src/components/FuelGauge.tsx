@@ -19,19 +19,24 @@ export function FuelGauge() {
     const isLow = fuel < 20;
 
     return (
-        <div className="w-full flex items-center space-x-4 bg-transparent p-2 rounded-xl">
-            <span className="text-teal-400 text-xs font-bold uppercase tracking-widest w-24">FuelVoucher</span>
-            <div className="flex-grow h-3 bg-zinc-800/50 rounded-full relative overflow-hidden ring-1 ring-white/10 shadow-inner">
-                <motion.div
-                    className={`absolute top-0 left-0 h-full rounded-full transition-colors ${isLow ? 'bg-rose-500 shadow-[0_0_10px_#f43f5e]' : 'bg-teal-400 shadow-[0_0_10px_#2dd4bf]'}`}
-                    initial={{ width: '100%' }}
-                    animate={{ width: `${fuel}%` }}
-                    transition={{ ease: "linear", duration: 0.2 }}
-                />
+        <div className="w-full flex flex-col justify-center h-full">
+            <div className="font-mono text-[32px] mb-2">{fuel.toFixed(2)}%</div>
+            <div className="fuel-wrap w-full">
+                <div className="fuel-bar w-full">
+                    <motion.div
+                        className={`fuel-fill absolute top-0 left-0 transition-colors ${isLow ? '!bg-[var(--magenta-teleport)] !shadow-[0_0_15px_rgba(175,82,222,0.3)]' : ''}`}
+                        initial={{ width: '100%' }}
+                        animate={{ width: `${fuel}%` }}
+                        transition={{ ease: "linear", duration: 0.2 }}
+                    />
+                </div>
             </div>
-            <span className={`text-xs font-mono font-bold w-12 text-right ${isLow ? 'text-rose-500' : 'text-teal-400'}`}>
-                {fuel.toFixed(1)}%
-            </span>
+            <div className="flex justify-between text-xs text-[var(--text-sub)] mt-3">
+                <span>Process ID: Sovereign-88</span>
+                <span className={isLow ? 'text-[var(--magenta-teleport)]' : 'text-[var(--mint-success)]'}>
+                    {isLow ? 'CRITICAL' : 'ACTIVE'}
+                </span>
+            </div>
         </div>
     );
 }

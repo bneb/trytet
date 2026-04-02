@@ -8,6 +8,7 @@ import { PulseMap } from '../components/PulseMap';
 import { LedgerTerm } from '../components/LedgerTerm';
 import { FuelGauge } from '../components/FuelGauge';
 import { OnboardingModal } from '../components/OnboardingModal';
+import { Navbar } from '../components/Navbar';
 import { AnimatePresence } from 'framer-motion';
 
 function Dashboard() {
@@ -28,42 +29,54 @@ function Dashboard() {
     };
 
     return (
-        <div className="flex flex-col h-screen text-zinc-100 p-4 md:p-8 font-mono relative overflow-hidden">
+        <div className="flex flex-col min-h-screen relative overflow-x-hidden">
             <AnimatePresence>
                 {showModal && <OnboardingModal onHydrate={handleHydrate} />}
             </AnimatePresence>
 
-            <header className="glass-panel rounded-2xl flex justify-between items-center mb-6 px-6 py-4 flex-shrink-0 relative z-10 w-full">
-                <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-full bg-teal-500/20 flex items-center justify-center border border-teal-500/30">
-                        <div className={`w-3 h-3 rounded-full ${connected ? 'bg-teal-400 shadow-[0_0_10px_#2dd4bf]' : 'bg-zinc-600'}`} />
+            <Navbar />
+
+            <div className="w-full flex justify-center">
+                <header className="pt-24 pb-16 px-10 w-full max-w-[1000px]">
+                    <h1 className="text-[clamp(40px,8vw,72px)] font-bold tracking-tight mb-6 leading-[1.1]">
+                        Autonomous execution. <br/>
+                        <span className="text-[var(--text-sub)]">Zero-trust substrate.</span>
+                    </h1>
+                    <p className="text-[20px] text-[var(--text-sub)] max-w-[600px] mb-10">
+                        Trytet is the world’s first sovereign agentic OS. Built on a sub-millisecond Wasm substrate where processes teleport, think, and scale independently.
+                    </p>
+                    
+                    <div className="flex items-center gap-4 text-sm font-mono text-[var(--text-sub)]">
+                        STATUS: <span className={connected ? "text-[var(--mint-success)] font-bold" : "text-[var(--text-sub)]"}>
+                            {connected ? 'LINK ESTABLISHED' : 'OFFLINE'}
+                        </span>
+                        {!engine.initialized && !showModal && <span className="text-red-500 bg-red-500/10 px-2 py-1 rounded ml-auto">WASM Offline</span>}
                     </div>
-                    <h1 className="text-2xl font-bold tracking-widest uppercase text-white drop-shadow-md">Sovereign Playground</h1>
-                </div>
-                <div className="flex items-center space-x-4">
-                    <span className="text-sm text-zinc-400 font-semibold tracking-wider">
-                        STATUS: <span className={connected ? "text-teal-400" : "text-zinc-500"}>{connected ? 'LINK ESTABLISHED' : 'OFFLINE'}</span>
-                    </span>
-                    {!engine.initialized && !showModal && <span className="text-xs text-red-500 border border-red-500/30 px-2 py-1 rounded bg-red-500/10">WASM Offline</span>}
-                </div>
-            </header>
+                </header>
+            </div>
 
-            <main className="flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden mb-6 relative z-10">
-                {/* 1. Swarm Pulse (Center) */}
-                <div className="glass-panel p-1 rounded-2xl lg:col-span-2 relative h-full flex flex-col">
-                    <PulseMap />
-                </div>
+            <div className="w-full flex justify-center">
+                <main className="grid grid-cols-12 gap-6 px-5 md:px-10 pb-24 w-full max-w-[1000px]">
+                    
+                    {/* Fuel Gauge Card */}
+                    <div className="card col-span-12 md:col-span-6 relative">
+                        <div className="label">System Budget (Fuel)</div>
+                        <FuelGauge />
+                    </div>
 
-                {/* 2. Ledger Term (Right) */}
-                <div className="glass-panel p-1 rounded-2xl h-full relative flex flex-col">
-                    <LedgerTerm logs={engine.logs} />
-                </div>
-            </main>
+                    {/* Pulse Map Card */}
+                    <div className="card col-span-12 md:col-span-6 relative z-0">
+                        <div className="label">State Migration Latency</div>
+                        <PulseMap />
+                    </div>
 
-            {/* 3. Fuel Gauge (Bottom) */}
-            <footer className="glass-panel p-4 rounded-2xl flex-shrink-0 relative z-10">
-                <FuelGauge />
-            </footer>
+                    {/* Code Block / Ledger Term */}
+                    <div className="code-block col-span-12 relative min-h-[300px]">
+                        <LedgerTerm logs={engine.logs} />
+                    </div>
+
+                </main>
+            </div>
         </div>
     );
 }

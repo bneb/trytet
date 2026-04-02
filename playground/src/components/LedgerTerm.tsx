@@ -12,15 +12,24 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
     useEffect(() => {
         if (!termRef.current) return;
 
+        // Try to get computed styles for exact hex values, fallback to approximate if SSR
+        const isClient = typeof window !== 'undefined';
+        const getVar = (name: string, fallback: string) => 
+            isClient ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback : fallback;
+
+        // Note: xterm.js theme requires actual hex/rgba strings, CSS variables often don't parse well directly in canvas
         const term = new Terminal({
             theme: {
                 background: 'transparent',
-                foreground: '#a1a1aa', // zinc-400
-                cursor: '#2dd4bf', // teal-400
+                // Map to var(--text-sub) or default
+                foreground: '#8E8E93',
+                // Map to var(--magenta-teleport) or default
+                cursor: '#AF52DE',
             },
-            fontFamily: 'monospace',
+            fontFamily: 'var(--font-mono), monospace',
             convertEol: true,
-            fontSize: 12,
+            fontSize: 13,
+            lineHeight: 1.4,
         });
 
         const fitAddon = new FitAddon();
@@ -29,8 +38,9 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
         term.open(termRef.current);
         fitAddon.fit();
 
-        term.writeln('Sovereign Ledger Node Online.');
-        term.writeln('Listening for Telemetry...\r\n');
+        // Print initial mock syntax-highlighted block
+        term.writeln('\x1b[38;2;99;99;102m// Substrate link verified. Listening for telemetry...\x1b[0m');
+        term.writeln('\x1b[38;2;0;122;255mconst\x1b[0m engine = \x1b[38;2;0;122;255mawait\x1b[0m Trytet.\x1b[38;2;175;82;222mconnect\x1b[0m();\r\n');
 
         xtermRef.current = term;
 
@@ -47,16 +57,14 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
     useEffect(() => {
         if (xtermRef.current && logs.length > 0) {
             const lastLog = logs[logs.length - 1];
-            xtermRef.current.writeln(`[SOVEREIGN] ${lastLog}`);
+            // Format incoming string like a telemetry string log
+            xtermRef.current.writeln(`\x1b[38;2;52;199;89m"\x1b[0m\x1b[38;2;142;142;147m[SOVEREIGN] ${lastLog}\x1b[0m\x1b[38;2;52;199;89m"\x1b[0m`);
         }
     }, [logs]);
 
     return (
-        <div className="flex flex-col h-full bg-transparent relative overflow-hidden rounded-xl">
-            <h2 className="text-zinc-400 p-2 uppercase text-xs font-bold border-b border-white/5 z-10 sticky top-0 bg-transparent backdrop-blur-md">
-                Terminal Ledger
-            </h2>
-            <div ref={termRef} className="flex-grow p-4" />
+        <div className="w-full h-full flex flex-col pt-2">
+            <div ref={termRef} className="flex-grow w-full" />
         </div>
     );
 }
