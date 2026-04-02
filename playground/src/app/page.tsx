@@ -25,13 +25,13 @@ export default function Page() {
                 <main className="px-5 md:px-10 pb-24 w-full max-w-[1000px]">
                     <div className="flex flex-col gap-6 max-w-[800px]">
                         <p className="text-[18px] text-[var(--text-sub)] leading-relaxed">
-                            <strong className="text-[var(--text-main)]">Context Limits & Crashes:</strong> Traditional AI agents lose their memory when the system crashes or API limits are hit. Trytet compiles agents into a <code>.tet</code> footprint, allowing zero-overhead snapshots, hibernation mid-thought, and seamless state resumption.
+                            <strong className="text-[var(--text-main)]">Context Limits & Crashes:</strong> Agents halt. APIs rate-limit. Trytet drops execution context into a deterministic <code>.tet</code> binary. Snapshot them instantly, hibernate mid-thought, and safely fork states without re-running initialization.
                         </p>
                         <p className="text-[18px] text-[var(--text-sub)] leading-relaxed">
-                            <strong className="text-[var(--text-main)]">Untrusted Execution:</strong> Don't give an LLM root access to your machine. Trytet acts as an embedded zero-trust sandbox that spins up in sub-milliseconds with strict fuel accounting, isolating machine-generated code safely.
+                            <strong className="text-[var(--text-main)]">Untrusted Execution:</strong> Giving an LLM unverified host execution breaks security. We evaluate volatile code in an embedded, sub-millisecond sandbox wrapped with cryptographic fuel accounting.
                         </p>
                         <p className="text-[18px] text-[var(--text-sub)] leading-relaxed">
-                            <strong className="text-[var(--text-main)]">Edge Swarming:</strong> Compute should follow the data. Instantly migrate an active agent's linear memory across the globe via P2P primitives to query massive databases with zero latency.
+                            <strong className="text-[var(--text-main)]">Edge Swarming:</strong> Data is heavy. Compute is light. By serializing active Wasm memory, you can migrate live executing agents directly to edge nodes hosting your vector databases to eliminate latency.
                         </p>
                         
                         <div className="flex items-center gap-4 mt-6">
