@@ -15,10 +15,10 @@ interface Agent {
     wins: number;
     losses: number;
     draws: number;
-    fuel: number;
+    fuel: number;       // Wasm instruction budget (0-100%). At 0 → OutOfFuel → sandbox kills process.
     lastMove: Move | null;
     moveHistory: Move[];
-    eliminated: boolean;
+    eliminated: boolean; // true when fuel === 0 (ExecutionStatus::OutOfFuel)
 }
 
 interface MatchResult {
@@ -95,7 +95,8 @@ function createAgents(): Agent[] {
     ];
     return configs.map((c, i) => ({
         id: i, name: c.name, strategy: c.strategy,
-        wins: 0, losses: 0, draws: 0, fuel: 100,
+        wins: 0, losses: 0, draws: 0,
+        fuel: 100, // 100% of allocated_fuel (maps to store.set_fuel() in the real engine)
         lastMove: null, moveHistory: [], eliminated: false,
     }));
 }
@@ -253,8 +254,10 @@ export default function WebDemoPage() {
                     else if (result === 'b') { agentB.wins++; agentA.losses++; winner = agentB.name; }
                     else { agentA.draws++; agentB.draws++; }
 
+                    // Each round burns Wasm fuel. In the real engine, every instruction costs 1 fuel.
                     agentA.fuel = Math.max(0, agentA.fuel - 3);
                     agentB.fuel = Math.max(0, agentB.fuel - 3);
+                    // fuel === 0 → ExecutionStatus::OutOfFuel → sandbox terminates the process
                     if (agentA.fuel <= 0) agentA.eliminated = true;
                     if (agentB.fuel <= 0) agentB.eliminated = true;
 
@@ -395,9 +398,10 @@ export default function WebDemoPage() {
                         Git for running processes.
                     </h1>
                     <p className="text-[16px] text-[var(--text-sub)] max-w-[620px] mb-6">
-                        8 agents compete in a live RPS tournament. Every 5 rounds, Trytet serializes their state
-                        into a portable <strong style={{ color: 'var(--text-main)' }}>bincode snapshot</strong> via
-                        real WebAssembly. Click any station on the timeline to <strong style={{ color: 'var(--text-main)' }}>rewind and fork</strong>.
+                        8 agents compete in a live RPS tournament. Each starts with a <strong style={{ color: 'var(--text-main)' }}>Wasm fuel budget</strong> —
+                        every round burns compute. When fuel hits zero, the sandbox kills the process.
+                        Every 5 rounds, Trytet serializes state into a portable <strong style={{ color: 'var(--text-main)' }}>bincode snapshot</strong> via
+                        real WebAssembly. Click any station to <strong style={{ color: 'var(--text-main)' }}>rewind and fork</strong>.
                     </p>
                     <div className="flex items-center gap-3 flex-wrap">
                         <button onClick={toggleRun} className="btn" style={{ minWidth: 120 }}>
@@ -450,7 +454,7 @@ export default function WebDemoPage() {
                                                 <span style={{ fontWeight: 600, color: agent.eliminated ? 'var(--text-sub)' : 'var(--text-main)' }}>
                                                     {agent.name}
                                                 </span>
-                                                {agent.eliminated && <span style={{ fontSize: 10, color: '#FF453A' }}>☠</span>}
+                                                {agent.eliminated && <span title="ExecutionStatus::OutOfFuel" style={{ fontSize: 9, color: '#FF453A', fontFamily: "'JetBrains Mono', monospace" }}>OOF</span>}
                                                 {agent.lastMove && !agent.eliminated && (
                                                     <span style={{ fontSize: 12, opacity: 0.6 }}>{MOVE_EMOJI[agent.lastMove]}</span>
                                                 )}
@@ -461,10 +465,10 @@ export default function WebDemoPage() {
                                         <td style={{ textAlign: 'center', padding: '10px 12px', color: 'var(--text-sub)' }}>{agent.draws}</td>
                                         <td style={{ textAlign: 'right', padding: '10px 24px' }}>
                                             <div className="flex items-center justify-end gap-2">
-                                                <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--code-bg)', overflow: 'hidden' }}>
+                                                <div title="Wasm fuel remaining — each round burns ~3% of allocated compute" style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--code-bg)', overflow: 'hidden' }}>
                                                     <div style={{ width: `${agent.fuel}%`, height: '100%', background: agent.fuel < 20 ? '#FF453A' : '#007AFF', transition: 'width 0.3s ease' }} />
                                                 </div>
-                                                <span style={{ color: agent.fuel < 20 ? '#FF453A' : 'var(--text-sub)', fontSize: 11 }}>{agent.fuel}%</span>
+                                                <span title={agent.fuel <= 0 ? 'OutOfFuel — sandbox terminated' : `${agent.fuel}% of allocated_fuel remaining`} style={{ color: agent.fuel < 20 ? '#FF453A' : 'var(--text-sub)', fontSize: 11 }}>{agent.fuel}%</span>
                                             </div>
                                         </td>
                                     </tr>
