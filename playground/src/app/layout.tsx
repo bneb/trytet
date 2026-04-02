@@ -13,8 +13,19 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://trytet.com'),
   title: "Trytet | Ephemeral AI Runtime",
   description: "Trytet is an ephemeral, sub-millisecond runtime for AI agents.",
+  icons: {
+    icon: '/icon.svg',
+  },
+  openGraph: {
+    images: [{ url: '/social-preview.svg', width: 1200, height: 630 }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    images: ['/social-preview.svg'],
+  },
 };
 
 export default function RootLayout({
