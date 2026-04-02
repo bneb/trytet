@@ -18,13 +18,13 @@ export function Navbar() {
 
   return (
     <nav className="sticky top-0 z-[100] backdrop-blur-md bg-[var(--nav-bg)] px-5 md:px-10 py-5 flex justify-between items-center border-b border-[var(--card-border)] transition-colors duration-400">
-      <div className="trytet-logo-container">
+      <Link href="/" className="trytet-logo-container">
           <div className="trytet-sigil">
               <div className="trytet-substrate"></div>
               <div className="trytet-core"></div>
           </div>
           <h1 className="trytet-wordmark">Trytet</h1>
-      </div>
+      </Link>
       
       <div className="flex items-center gap-4 md:gap-8">
         <div 
@@ -55,15 +55,15 @@ export function Navbar() {
           {/* Invisible spacer to reserve width during the slide */}
           <div className="w-6 h-6 shrink-0" />
         </div>
-        <div className="flex items-center gap-3">
-          <Link href="/how-to" className="text-sm font-semibold tracking-wide hover:text-[var(--text-sub)] transition-colors">
+        <div className="flex items-center gap-1 md:gap-2">
+          <Link href="/how-to" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
             How To
           </Link>
-          <Link href="/web-demo" className="text-sm font-semibold tracking-wide hover:text-[var(--text-sub)] transition-colors">
+          <Link href="/web-demo" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
             Live Demo
           </Link>
-          <a href="https://github.com/bneb/trytet" target="_blank" rel="noreferrer">
-            <button className="btn">GitHub</button>
+          <a href="https://github.com/bneb/trytet" target="_blank" rel="noreferrer" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
+            GitHub
           </a>
         </div>
       </div>
