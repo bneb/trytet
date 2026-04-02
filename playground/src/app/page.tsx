@@ -2,15 +2,18 @@
 import { SwarmProvider } from '../providers/SwarmProvider';
 import { useSwarm } from '../providers/SwarmProvider';
 import { useTetEngine } from '../hooks/useTetEngine';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { PulseMap } from '../components/PulseMap';
 import { LedgerTerm } from '../components/LedgerTerm';
 import { FuelGauge } from '../components/FuelGauge';
+import { OnboardingModal } from '../components/OnboardingModal';
+import { AnimatePresence } from 'framer-motion';
 
 function Dashboard() {
     const { connected, triggerTeleport, lastSnapshotPayload, telemetryFrames } = useSwarm();
     const engine = useTetEngine();
+    const [showModal, setShowModal] = useState(true);
 
     useEffect(() => {
         if (lastSnapshotPayload && engine.initialized) {
@@ -19,36 +22,46 @@ function Dashboard() {
         }
     }, [lastSnapshotPayload, engine.initialized, engine.hydrateSnapshot]);
 
+    const handleHydrate = () => {
+        triggerTeleport("agent-1");
+        setShowModal(false);
+    };
+
     return (
-        <div className="flex flex-col h-screen bg-black text-[#00ff9d] p-8 font-mono">
-            <header className="flex justify-between items-center mb-6 border-b border-[#fe2c55] pb-4 flex-shrink-0">
-                <h1 className="text-3xl font-bold tracking-widest uppercase">Sovereign Playground</h1>
+        <div className="flex flex-col h-screen text-zinc-100 p-4 md:p-8 font-mono relative overflow-hidden">
+            <AnimatePresence>
+                {showModal && <OnboardingModal onHydrate={handleHydrate} />}
+            </AnimatePresence>
+
+            <header className="glass-panel rounded-2xl flex justify-between items-center mb-6 px-6 py-4 flex-shrink-0 relative z-10 w-full">
+                <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 rounded-full bg-teal-500/20 flex items-center justify-center border border-teal-500/30">
+                        <div className={`w-3 h-3 rounded-full ${connected ? 'bg-teal-400 shadow-[0_0_10px_#2dd4bf]' : 'bg-zinc-600'}`} />
+                    </div>
+                    <h1 className="text-2xl font-bold tracking-widest uppercase text-white drop-shadow-md">Sovereign Playground</h1>
+                </div>
                 <div className="flex items-center space-x-4">
-                    <span className="text-sm">STATUS: {connected ? 'LINK ESTABLISHED' : 'OFFLINE'}</span>
-                    <button 
-                        onClick={() => triggerTeleport("agent-1")}
-                        className="bg-[#fe2c55] text-white px-6 py-2 rounded-sm font-bold uppercase hover:bg-[#fe2c55]/80 transition-colors"
-                    >
-                        Initiate Teleport
-                    </button>
-                    {!engine.initialized && <span className="text-xs text-red-500">WASM Offline</span>}
+                    <span className="text-sm text-zinc-400 font-semibold tracking-wider">
+                        STATUS: <span className={connected ? "text-teal-400" : "text-zinc-500"}>{connected ? 'LINK ESTABLISHED' : 'OFFLINE'}</span>
+                    </span>
+                    {!engine.initialized && !showModal && <span className="text-xs text-red-500 border border-red-500/30 px-2 py-1 rounded bg-red-500/10">WASM Offline</span>}
                 </div>
             </header>
 
-            <main className="flex-grow grid grid-cols-3 gap-8 overflow-hidden mb-6">
+            <main className="flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden mb-6 relative z-10">
                 {/* 1. Swarm Pulse (Center) */}
-                <div className="col-span-2 relative h-full flex flex-col">
+                <div className="glass-panel p-1 rounded-2xl lg:col-span-2 relative h-full flex flex-col">
                     <PulseMap />
                 </div>
 
                 {/* 2. Ledger Term (Right) */}
-                <div className="h-full relative flex flex-col">
+                <div className="glass-panel p-1 rounded-2xl h-full relative flex flex-col">
                     <LedgerTerm logs={engine.logs} />
                 </div>
             </main>
 
             {/* 3. Fuel Gauge (Bottom) */}
-            <footer className="flex-shrink-0">
+            <footer className="glass-panel p-4 rounded-2xl flex-shrink-0 relative z-10">
                 <FuelGauge />
             </footer>
         </div>

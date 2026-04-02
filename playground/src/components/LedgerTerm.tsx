@@ -14,9 +14,9 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
 
         const term = new Terminal({
             theme: {
-                background: '#050505',
-                foreground: '#00ff9d',
-                cursor: '#fe2c55',
+                background: 'transparent',
+                foreground: '#a1a1aa', // zinc-400
+                cursor: '#2dd4bf', // teal-400
             },
             fontFamily: 'monospace',
             convertEol: true,
@@ -52,11 +52,11 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
     }, [logs]);
 
     return (
-        <div className="flex flex-col h-full border border-[#333] bg-[#050505] relative overflow-hidden">
-            <h2 className="text-[#00ff9d] p-2 uppercase text-xs font-bold border-b border-[#333] z-10 sticky top-0 bg-[#050505]">
+        <div className="flex flex-col h-full bg-transparent relative overflow-hidden rounded-xl">
+            <h2 className="text-zinc-400 p-2 uppercase text-xs font-bold border-b border-white/5 z-10 sticky top-0 bg-transparent backdrop-blur-md">
                 Terminal Ledger
             </h2>
-            <div ref={termRef} className="flex-grow p-2" />
+            <div ref={termRef} className="flex-grow p-4" />
         </div>
     );
 }

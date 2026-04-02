@@ -19,17 +19,17 @@ export function FuelGauge() {
     const isLow = fuel < 20;
 
     return (
-        <div className="w-full flex items-center space-x-4 border border-[#333] p-2 bg-[#050505]">
-            <span className="text-[#00ff9d] text-xs font-bold uppercase w-24">FuelVoucher</span>
-            <div className="flex-grow h-4 bg-[#111] relative overflow-hidden ring-1 ring-[#333]">
+        <div className="w-full flex items-center space-x-4 bg-transparent p-2 rounded-xl">
+            <span className="text-teal-400 text-xs font-bold uppercase tracking-widest w-24">FuelVoucher</span>
+            <div className="flex-grow h-3 bg-zinc-800/50 rounded-full relative overflow-hidden ring-1 ring-white/10 shadow-inner">
                 <motion.div
-                    className={`absolute top-0 left-0 h-full ${isLow ? 'bg-[#fe2c55]' : 'bg-[#00ff9d]'}`}
+                    className={`absolute top-0 left-0 h-full rounded-full transition-colors ${isLow ? 'bg-rose-500 shadow-[0_0_10px_#f43f5e]' : 'bg-teal-400 shadow-[0_0_10px_#2dd4bf]'}`}
                     initial={{ width: '100%' }}
                     animate={{ width: `${fuel}%` }}
                     transition={{ ease: "linear", duration: 0.2 }}
                 />
             </div>
-            <span className={`text-xs font-mono font-bold w-12 text-right ${isLow ? 'text-[#fe2c55]' : 'text-[#00ff9d]'}`}>
+            <span className={`text-xs font-mono font-bold w-12 text-right ${isLow ? 'text-rose-500' : 'text-teal-400'}`}>
                 {fuel.toFixed(1)}%
             </span>
         </div>

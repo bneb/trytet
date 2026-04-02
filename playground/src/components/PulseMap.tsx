@@ -25,9 +25,10 @@ export function PulseMap() {
     };
 
     return (
-        <div className="w-full h-full relative overflow-hidden bg-[#0A0A0A] border border-[#333] shadow-inner font-mono p-4" data-testid="pulse-map">
-            <h3 className="absolute top-4 left-4 text-[#00ff9d] text-xs uppercase tracking-[0.2em] z-10">
-                Sovereign Network Topology [51 Nodes]
+        <div className="w-full h-full relative overflow-hidden bg-transparent font-mono p-4" data-testid="pulse-map">
+            <h3 className="absolute top-4 left-4 text-teal-400 text-xs uppercase tracking-[0.2em] font-bold z-10 flex items-center space-x-2 drop-shadow-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                <span>Sovereign Network Topology [51 Nodes]</span>
             </h3>
             
             <svg className="w-full h-full" viewBox="0 0 540 420">
@@ -38,8 +39,8 @@ export function PulseMap() {
                         cx={pos.x}
                         cy={pos.y}
                         r={4}
-                        fill="#333"
-                        className="transition-colors duration-500 hover:fill-[#00ff9d]"
+                        fill="#3f3f46"
+                        className="transition-colors duration-500 hover:fill-teal-400 cursor-crosshair"
                     />
                 ))}
 
@@ -59,8 +60,9 @@ export function PulseMap() {
                                 y1={posFrom.y}
                                 x2={posTo.x}
                                 y2={posTo.y}
-                                stroke={frame.error_count > 0 ? "#fe2c55" : "#00ff9d"}
+                                stroke={frame.error_count > 0 ? "#f43f5e" : "#2dd4bf"}
                                 strokeWidth={Math.min(frame.call_count, 4)}
+                                filter="drop-shadow(0px 0px 4px rgba(45, 212, 191, 0.4))"
                                 initial={{ pathLength: 0, opacity: 1 }}
                                 animate={{ pathLength: 1, opacity: 0 }}
                                 exit={{ opacity: 0 }}
