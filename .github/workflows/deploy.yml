@@ -1,0 +1,50 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy-fly:
+    name: Deploy Backend to Fly.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-pages:
+    name: Deploy Frontend to Cloudflare Pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.80.0
+          targets: wasm32-unknown-unknown
+      - name: Install Wasm-Pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build WebAssembly Bridge
+        run: |
+          cd crates/tet-web
+          wasm-pack build --target web --release --out-dir ../../playground/pkg
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build Dashboard
+        run: |
+          cd playground
+          npm ci --legacy-peer-deps
+          npm run build
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: trytet-web
+          directory: playground/out
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
