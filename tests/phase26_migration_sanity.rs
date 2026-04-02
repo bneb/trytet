@@ -18,7 +18,7 @@ async fn test_phase_26_migration_sanity() {
         inference_state: vec![],
     };
 
-    let payload = bincode::serialize(&payload_obj).unwrap();
+    let _payload = bincode::serialize(&payload_obj).unwrap();
 
     // Simulate Node B (Production Fly.io node)
     let node_b = WasmtimeSandbox::new(mesh, voucher_manager, false, "node-b".to_string()).unwrap();

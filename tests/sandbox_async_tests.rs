@@ -25,7 +25,7 @@ async fn test_tar_extraction_starvation() {
         builder.finish().unwrap();
     }
 
-    let snap_id = "test_snapshot_id".to_string();
+    let _snap_id = "test_snapshot_id".to_string();
     let payload = SnapshotPayload {
         wasm_bytes: vec![0, 97, 115, 109, 1, 0, 0, 0], // minimal dummy Wasm header
         memory_bytes: vec![],

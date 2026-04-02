@@ -361,7 +361,7 @@ impl WasmtimeSandbox {
                                     }
                                     success_code = 2_i32; 
                                 } else {
-                                    let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                    let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
                                     m.copy_from_slice(&res.return_data);
                                     let written_size = response_len.to_le_bytes();
                                     if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
@@ -493,7 +493,7 @@ impl WasmtimeSandbox {
                             }
                             return Ok(2_i32);
                         } else {
-                            let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                            let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
                             m.copy_from_slice(&returned_bytes);
                             let written_size = response_len.to_le_bytes();
                             if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
@@ -599,7 +599,7 @@ impl WasmtimeSandbox {
                                     }
                                     return Ok(2); 
                                 } else {
-                                    let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                    let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
                                     m.copy_from_slice(&response_json);
                                     
                                     let written_size = response_len.to_le_bytes();
@@ -705,7 +705,7 @@ impl WasmtimeSandbox {
                                             }
                                             return Ok(2); 
                                         } else {
-                                            let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                            let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
                                             m.copy_from_slice(&response_json);
 
                                             let written_size = response_len.to_le_bytes();

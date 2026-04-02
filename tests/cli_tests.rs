@@ -1,18 +1,15 @@
-use std::collections::HashMap;
 use std::fs;
 use tokio::process::Command;
 use std::sync::Arc;
 use tet_core::api::{router, AppState};
-use tet_core::engine::TetSandbox;
 use tet_core::mesh::TetMesh;
 use tet_core::registry::LocalRegistry;
 use tet_core::sandbox::WasmtimeSandbox;
-use tokio::net::TcpListener;
 
 async fn spawn_mock_api_server() -> (u16, u16) {
     let registry = Arc::new(LocalRegistry::new().unwrap());
     let hive_peers = tet_core::hive::HivePeers::new();
-    let (mesh, worker_rx) = TetMesh::new(100, hive_peers.clone());
+    let (mesh, _worker_rx) = TetMesh::new(100, hive_peers.clone());
     let sandbox = Arc::new(WasmtimeSandbox::new(mesh.clone(), std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).unwrap());
     
     // Drop worker_rx to avoid hanging if the test triggers mesh execution, 

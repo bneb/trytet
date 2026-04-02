@@ -3,7 +3,7 @@ use std::time::Instant;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_vfs_concurrent_compaction() {
-    let mut vfs = VectorVfs::new();
+    let vfs = VectorVfs::new();
     // Background worker starts automatically in new()
     
     let vfs = std::sync::Arc::new(vfs);

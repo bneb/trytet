@@ -1,6 +1,4 @@
 use tet_core::sandbox::{SnapshotPayload, WasmtimeSandbox};
-use tet_core::engine::TetSandbox;
-use tet_core::models::TetExecutionRequest;
 use tet_core::mesh::TetMesh;
 use tet_core::economy::VoucherManager;
 use std::sync::Arc;
@@ -9,7 +7,7 @@ use std::sync::Arc;
 async fn test_phase_23_browser_handoff() {
     let (mesh, _) = TetMesh::new(100, Default::default());
     let voucher_manager = Arc::new(VoucherManager::new("test-provider".to_string()));
-    let sandbox = WasmtimeSandbox::new(mesh, voucher_manager, false, "test-node".to_string()).unwrap();
+    let _sandbox = WasmtimeSandbox::new(mesh, voucher_manager, false, "test-node".to_string()).unwrap();
 
     let payload = SnapshotPayload {
         memory_bytes: vec![1, 2, 3, 4],

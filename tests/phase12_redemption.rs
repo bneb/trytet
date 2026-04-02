@@ -176,10 +176,10 @@ async fn test_shadow_index_vfs() {
 
 #[tokio::test]
 async fn test_deterministic_shield() {
-    let sandbox = setup_sandbox();
+    let _sandbox = setup_sandbox();
     // Simulate 51MB payload
     // Max is 50MB
-    let huge_vec = vec![0u8; 51 * 1024 * 1024];
+    let _huge_vec = vec![0u8; 51 * 1024 * 1024];
     
     // Instead of using bincode serialization manually, we just pass the struct
     // The Sandbox is supposed to enforce the size. Wait, import_snapshot takes SnapshotPayload?
@@ -191,7 +191,7 @@ async fn test_deterministic_shield() {
     // Let's check `src/sandbox/sandbox_wasmtime.rs` to see what I should test.
     // Let's manually trigger bincode deserialization that fails.
     
-    let config = tet_core::sandbox::sandbox_wasmtime::production_engine_config();
+    let _config = tet_core::sandbox::sandbox_wasmtime::production_engine_config();
     // Check if NaN canonicalization is true... wait, config is internal to Wasmtime, hard to assert.
     
     let encoded = vec![0u8; 51 * 1024 * 1024];
