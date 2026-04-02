@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trytet | How it Works & Use Cases</title>
+    
+    <script>
+        (function() {
+            try {
+                var localTheme = localStorage.getItem('trytet-theme');
+                var sysTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                var theme = localTheme || sysTheme;
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="styles.css">
+    <script src="theme.js" defer></script>
+    <style>
+        .use-case-section {
+            grid-column: span 12;
+            margin-bottom: 60px;
+        }
+        .use-case-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            align-items: start;
+        }
+        .use-case-text h2 {
+            font-size: 28px;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+        .use-case-text p {
+            color: var(--text-secondary);
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+        ul.benefits-list {
+            list-style: none;
+            margin-bottom: 24px;
+        }
+        ul.benefits-list li {
+            position: relative;
+            padding-left: 24px;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+            font-size: 15px;
+        }
+        ul.benefits-list li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+        
+        @media (max-width: 900px) {
+            .use-case-content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <nav aria-label="Main Navigation">
+        <a href="index.html" class="nav-brand" aria-label="Trytet Home">
+            <div class="trytet-sigil" aria-hidden="true">
+                <div class="trytet-substrate"></div>
+                <div class="trytet-core"></div>
+            </div>
+            <span class="brand-text">Trytet</span>
+        </a>
+        
+        <div class="nav-actions">
+            <a href="how-to.html" style="color: var(--text-primary); text-decoration: none; font-weight: 500; font-size: 14px; margin-right: 12px;">How To</a>
+            <div class="theme-toggle" id="theme-toggle" role="button" tabindex="0" aria-label="Toggle Light and Dark Mode">
+                <div class="theme-dot">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+                    </svg>
+                </div>
+            </div>
+            <a href="https://github.com/bneb/trytet" target="_blank" rel="noopener noreferrer">
+                <button class="btn">Get Started</button>
+            </a>
+        </div>
+    </nav>
+
+    <header class="hero" style="padding-bottom: 40px;">
+        <h1>Unleashing Autonomous Agents</h1>
+        <p class="subtitle">Trytet isn't just an execution sandbox; it is an embeddable compute substrate designed to solve the hardest problems in agentic workflows: context limits, untrusted code execution, and geographic latency.</p>
+    </header>
+
+    <main class="grid-12">
+        
+        <section class="use-case-section">
+            <div class="use-case-content">
+                <div class="use-case-text">
+                    <h2>1. The "Indestructible" AI Agent (LangChain Integration)</h2>
+                    <p>When running long-lived autonomous agents (like Devin or AutoGPT), system crashes, network failures, or API context limits usually mean starting from scratch. Trytet compiles agents into a persistent <code>.tet</code> footprint.</p>
+                    <ul class="benefits-list">
+                        <li><strong>Zero-Overhead Snapshots:</strong> Agents can be snapshotted instantly without losing their thread or scratchpad memory.</li>
+                        <li><strong>Hibernation:</strong> Pause execution while waiting on external API results (or humans) and awake exactly where you left off.</li>
+                        <li><strong>Seamless Resumption:</strong> Clone an agent mid-thought to try different decision branches simultaneously.</li>
+                    </ul>
+                </div>
+                <div class="code-block" style="grid-column: span 1; padding: 24px;">
+<pre><code><span class="tc-comment">// Wrapping an autonomous agent in Trytet</span>
+<span class="tc-keyword">import</span> { TrytetRuntime } <span class="tc-keyword">from</span> <span class="tc-string">'@trytet/sdk'</span>;
+
+<span class="tc-keyword">const</span> agent = <span class="tc-keyword">new</span> TrytetRuntime({
+    wasmBinary: <span class="tc-string">'./agent-core.tet'</span>,
+    maxFuel: <span class="tc-string">50000</span>, <span class="tc-comment">// deterministic budget</span>
+    onTimeout: <span class="tc-string">'checkpoint'</span>
+});
+
+<span class="tc-comment">// Run the agent dynamically</span>
+<span class="tc-keyword">const</span> execution = <span class="tc-keyword">await</span> agent.run({ 
+    task: <span class="tc-string">"Refactor this monolithic repo"</span> 
+});
+
+<span class="tc-comment">// Forking the agent exactly at crash state </span>
+<span class="tc-keyword">if</span> (execution.error) {
+    <span class="tc-keyword">const</span> clone = <span class="tc-keyword">await</span> TrytetRuntime.fork(
+        execution.snapshot_id
+    );
+    <span class="tc-keyword">await</span> clone.continue();
+}</code></pre>
+                </div>
+            </div>
+        </section>
+
+        <section class="use-case-section">
+            <div class="use-case-content">
+                <div class="code-block" style="grid-column: span 1; padding: 24px; order: 1;">
+<pre><code><span class="tc-keyword">import</span> trytet
+
+<span class="tc-comment"># Define strict boundaries before execution</span>
+env = trytet.Environment(
+    max_memory_mb=<span class="tc-string">128</span>,
+    vfs_mounts={<span class="tc-string">"/workspace"</span>: <span class="tc-string">"./isolated"</span>},
+    network_egress=False
+)
+
+<span class="tc-comment"># LLM generated string</span>
+untrusted_code = <span class="tc-string">"import os; os.system('rm -rf /')"</span>
+
+<span class="tc-comment"># Try to run it in the ephemeral sandbox</span>
+try:
+    result = trytet.spawn(code=untrusted_code, env=env)
+except trytet.SecurityViolation as e:
+    <span class="tc-func">print</span>(f<span class="tc-string">"Blocked: {e.reason}"</span>) 
+    <span class="tc-comment"># Responds gracefully, host is fully insulated</span></code></pre>
+                </div>
+                <div class="use-case-text" style="order: 2;">
+                    <h2>2. Untrusted OS-Level Code Execution</h2>
+                    <p>Current LLM workflows are fragile. Providing your local machine environment to LLM generators to test Python/Bash scripts exposes you to critical security risks and corrupt states. Trytet solves this entirely by acting as a zero-trust runtime.</p>
+                    <ul class="benefits-list">
+                        <li><strong>Safe Evaluators:</strong> Execute arbitrary, unverified code written by LLMs without spinning up heavy Docker containers.</li>
+                        <li><strong>Instant Isolation:</strong> Sub-millisecond boot times mean your agent can run hundreds of micro-tests locally without performance degradation.</li>
+                        <li><strong>Strict Accounting:</strong> Guaranteed CPU-fuel bounds ensure an LLM can't induce an infinite loop computationally stalling your system.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="use-case-section">
+            <div class="use-case-content">
+                <div class="use-case-text">
+                    <h2>3. Dynamic Multi-Agent Edge Swarming</h2>
+                    <p>Instead of constantly streaming huge vectors of information to a centralized server, send the logic to where the data naturally lives. The engine natively serializes processes perfectly across the network boundary.</p>
+                    <ul class="benefits-list">
+                        <li><strong>Compute Follows Data:</strong> Transmit an active `.tet` instance to an edge node to query its local Vectorized cache, avoiding roundtrip latencies entirely.</li>
+                        <li><strong>Swarm Intelligence:</strong> Duplicate an agent across 10 regions from a single orchestrator node utilizing simple P2P primitives.</li>
+                    </ul>
+                </div>
+                <div class="code-block" style="grid-column: span 1; padding: 24px;">
+<pre><code><span class="tc-keyword">use</span> trytet::mesh::{MeshNode, TeleportRequest};
+
+<span class="tc-comment">// Agent decides to migrate to Europe edge node</span>
+<span class="tc-keyword">let</span> eu_target = <span class="tc-string">"edge_frankfurt_01"</span>;
+
+<span class="tc-comment">// Instantly serialize Heap/Wasm linear memory</span>
+<span class="tc-keyword">let</span> snapshot = local_engine.take_snapshot();
+
+<span class="tc-comment">// P2P network transit over WebRTC/TCP</span>
+node.teleport(<span class="tc-func">TeleportRequest</span> {
+    target: eu_target,
+    payload: snapshot,
+    <span class="tc-comment">// Re-awakens on the other side exactly</span>
+    <span class="tc-comment">// where the network call was initiated</span>
+}).<span class="tc-keyword">await</span>?;</code></pre>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+</body>
+</html>
