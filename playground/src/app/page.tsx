@@ -18,9 +18,6 @@ export default function Page() {
                         Trytet is an ephemeral, sub-millisecond runtime where AI agents seamlessly migrate, execute, and scale across native boundaries.
                     </p>
                     
-                    <div className="flex items-center gap-4 text-sm font-mono text-[var(--text-sub)]">
-                        STATUS: <span className="text-[var(--mint-success)] font-bold">LINK ESTABLISHED</span>
-                    </div>
                 </header>
             </div>
 
