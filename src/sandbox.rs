@@ -11,7 +11,7 @@ pub struct SnapshotPayload {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-mod sandbox_wasmtime;
+pub mod sandbox_wasmtime;
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox_wasmtime::*;
 

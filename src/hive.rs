@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use bincode::Options;
 use crate::models::TetManifest;
-use crate::sandbox::SnapshotPayload;
+use crate::sandbox::{SnapshotPayload, MAX_SNAPSHOT_SIZE};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -127,8 +128,11 @@ impl HiveServer {
         let mut payload = vec![0u8; len];
         socket.read_exact(&mut payload).await?;
 
-        // Deserialize
-        let command: HiveCommand = bincode::deserialize(&payload)?;
+        let command: HiveCommand = bincode::options()
+            .with_limit(MAX_SNAPSHOT_SIZE)
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .deserialize(&payload)?;
 
         match command {
             HiveCommand::Join(identity) => {
@@ -228,7 +232,11 @@ impl HiveClient {
         if res_len > 0 {
             let mut res_payload = vec![0u8; res_len];
             socket.read_exact(&mut res_payload).await?;
-            let response: HiveCommand = bincode::deserialize(&res_payload)?;
+            let response: HiveCommand = bincode::options()
+                .with_limit(MAX_SNAPSHOT_SIZE)
+                .with_fixint_encoding()
+                .allow_trailing_bytes()
+                .deserialize(&res_payload)?;
             Ok(response)
         } else {
             Ok(HiveCommand::Pulse) // empty ack

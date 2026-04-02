@@ -40,6 +40,8 @@ interface Snapshot {
     blobSize: number;       // Real bincode blob size in bytes
     serializeMs: number;    // Real serialization time
     blobPreview: string;    // Hex preview of first 32 bytes
+    sha256: string;         // SHA-256 of the bincode blob (via SubtleCrypto)
+    stateSize: number;      // Pre-serialization state size (JSON bytes)
 }
 
 // Wasm engine reference (loaded lazily)
@@ -128,6 +130,10 @@ export default function WebDemoPage() {
     const matchLogRef = useRef<HTMLDivElement>(null);
     const snapshotIdCounter = useRef(0);
 
+    // Cumulative Wasm telemetry — tracks total proof-of-work
+    const wasmStats = useRef({ calls: 0, totalBytes: 0, totalMs: 0 });
+    const [statsVersion, setStatsVersion] = useState(0);
+
     // Initialize the real Wasm module on mount
     useEffect(() => {
         (async () => {
@@ -150,6 +156,12 @@ export default function WebDemoPage() {
         }
     }, [matchLog]);
 
+    // Async SHA-256 hash of a Uint8Array via SubtleCrypto
+    const hashBlob = useCallback(async (data: Uint8Array): Promise<string> => {
+        const hash = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
+        return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }, []);
+
     // Take a snapshot — routes through real Wasm bincode if available
     const takeSnapshot = useCallback((label: string, currentRound: number, currentAgents: Agent[]) => {
         const id = snapshotIdCounter.current++;
@@ -162,13 +174,30 @@ export default function WebDemoPage() {
         let bincodeBlob: Uint8Array | null = null;
 
         if (wasmEngine) {
-            // Route through the REAL Wasm bincode serializer
             const t0 = performance.now();
             try {
                 bincodeBlob = wasmEngine.snapshot_state(stateBytes);
                 serializeMs = performance.now() - t0;
                 blobSize = bincodeBlob!.length;
                 blobPreview = toHex(bincodeBlob!);
+
+                // Update cumulative stats
+                wasmStats.current.calls++;
+                wasmStats.current.totalBytes += blobSize;
+                wasmStats.current.totalMs += serializeMs;
+                setStatsVersion(v => v + 1);
+
+                // Structured console telemetry
+                console.groupCollapsed(
+                    `%c[TRYTET] %csnapshot_state%c → ${blobSize}B in ${serializeMs.toFixed(3)}ms`,
+                    'color:#007AFF;font-weight:bold', 'color:#34C759', 'color:inherit'
+                );
+                console.log('State (JSON):', stateBytes.length, 'bytes');
+                console.log('Bincode blob:', blobSize, 'bytes');
+                console.log('Overhead:', blobSize - stateBytes.length, 'bytes (SnapshotPayload header)');
+                console.log('Serialization:', serializeMs.toFixed(3), 'ms');
+                console.log('Hex:', blobPreview);
+                console.groupEnd();
             } catch (e) {
                 console.error('Wasm snapshot failed:', e);
             }
@@ -179,14 +208,23 @@ export default function WebDemoPage() {
             agents: currentAgents.map(a => ({ ...a, moveHistory: [...a.moveHistory] })),
             label, timestamp: Date.now(),
             blobSize, serializeMs, blobPreview,
+            sha256: '', stateSize: stateBytes.length,
         };
 
-        // Stash the real bincode blob on the snapshot object for restore
         (snap as any)._blob = bincodeBlob;
+
+        // Compute SHA-256 asynchronously
+        if (bincodeBlob) {
+            hashBlob(bincodeBlob).then(hash => {
+                snap.sha256 = hash;
+                setSnapshots(prev => prev.map(s => s.id === snap.id ? { ...s, sha256: hash } : s));
+                console.log(`%c[TRYTET] %cSHA-256%c ${hash.slice(0, 16)}…`, 'color:#007AFF;font-weight:bold', 'color:#AF52DE', 'color:inherit');
+            });
+        }
 
         setSnapshots(prev => [...prev, snap]);
         return snap;
-    }, []);
+    }, [hashBlob]);
 
     // Restore from a snapshot — routes through real Wasm bincode deserialization
     const restoreSnapshot = useCallback((snap: Snapshot) => {
@@ -512,7 +550,7 @@ export default function WebDemoPage() {
             {/* SNAPSHOT INSPECTOR */}
             {selectedSnapshot && (
                 <div className="w-full flex justify-center">
-                    <div className="px-5 md:px-10 pb-16 w-full max-w-[1000px]">
+                    <div className="px-5 md:px-10 pb-6 w-full max-w-[1000px]">
                         <div style={{
                             background: 'var(--code-bg)', borderRadius: 8, padding: 20,
                             border: '1px solid var(--card-border)', fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
@@ -521,22 +559,98 @@ export default function WebDemoPage() {
                                 <div style={{ color: '#007AFF', fontWeight: 600, fontSize: 12 }}>
                                     ⑂ Snapshot #{selectedSnapshot.id} — {selectedSnapshot.label}
                                 </div>
-                                <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, color: 'var(--text-sub)' }}>
+                                <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, color: 'var(--text-sub)', flexWrap: 'wrap' }}>
                                     <span>Format: <span style={{ color: 'var(--text-main)' }}>bincode</span></span>
-                                    <span>Size: <span style={{ color: 'var(--text-main)' }}>{selectedSnapshot.blobSize}B</span></span>
-                                    <span>Serialized: <span style={{ color: '#34C759' }}>{selectedSnapshot.serializeMs.toFixed(3)}ms</span></span>
+                                    <span>Payload: <span style={{ color: 'var(--text-main)' }}>{selectedSnapshot.stateSize}B</span> → Blob: <span style={{ color: 'var(--text-main)' }}>{selectedSnapshot.blobSize}B</span></span>
+                                    <span>Time: <span style={{ color: '#34C759' }}>{selectedSnapshot.serializeMs.toFixed(3)}ms</span></span>
                                 </div>
                             </div>
                             <div style={{ wordBreak: 'break-all', opacity: 0.5, fontSize: 10, lineHeight: 1.6 }}>
                                 {selectedSnapshot.blobPreview}
                             </div>
+                            {selectedSnapshot.sha256 && (
+                                <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-sub)' }}>
+                                    SHA-256: <span style={{ color: '#AF52DE', letterSpacing: '0.5px' }}>{selectedSnapshot.sha256}</span>
+                                </div>
+                            )}
                             <div style={{ marginTop: 8, color: 'var(--text-sub)', fontSize: 10, fontStyle: 'italic' }}>
-                                Byte-compatible with POST /v1/tet/import on any Trytet node.
+                                This blob is byte-compatible with POST /v1/tet/import on any Trytet node.
                             </div>
                         </div>
                     </div>
                 </div>
             )}
+
+            {/* UNDER THE HOOD — Proof of Authenticity */}
+            <div className="w-full flex justify-center">
+                <div className="px-5 md:px-10 pb-20 w-full max-w-[1000px]">
+                    <div style={{
+                        borderRadius: 8, padding: 20,
+                        border: '1px solid var(--card-border)',
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                            <span style={{ fontSize: 13 }}>🔬</span>
+                            <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-main)', letterSpacing: '0.5px' }}>Under the Hood</span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+                            <div style={{ padding: 12, borderRadius: 6, background: 'var(--code-bg)', border: '1px solid var(--card-border)' }}>
+                                <div style={{ color: 'var(--text-sub)', fontSize: 10, marginBottom: 4 }}>Engine</div>
+                                <div style={{ color: wasmReady ? '#34C759' : '#FF453A', fontWeight: 600 }}>
+                                    {wasmReady ? 'tet_web.wasm' : 'Loading...'}
+                                </div>
+                            </div>
+                            <div style={{ padding: 12, borderRadius: 6, background: 'var(--code-bg)', border: '1px solid var(--card-border)' }}>
+                                <div style={{ color: 'var(--text-sub)', fontSize: 10, marginBottom: 4 }}>Wasm Calls</div>
+                                <div style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                                    {wasmStats.current.calls}
+                                </div>
+                            </div>
+                            <div style={{ padding: 12, borderRadius: 6, background: 'var(--code-bg)', border: '1px solid var(--card-border)' }}>
+                                <div style={{ color: 'var(--text-sub)', fontSize: 10, marginBottom: 4 }}>Total Serialized</div>
+                                <div style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                                    {wasmStats.current.totalBytes > 1024
+                                        ? `${(wasmStats.current.totalBytes / 1024).toFixed(1)} KB`
+                                        : `${wasmStats.current.totalBytes} B`}
+                                </div>
+                            </div>
+                            <div style={{ padding: 12, borderRadius: 6, background: 'var(--code-bg)', border: '1px solid var(--card-border)' }}>
+                                <div style={{ color: 'var(--text-sub)', fontSize: 10, marginBottom: 4 }}>Avg Serialize</div>
+                                <div style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                                    {wasmStats.current.calls > 0
+                                        ? `${(wasmStats.current.totalMs / wasmStats.current.calls).toFixed(3)}ms`
+                                        : '—'}
+                                </div>
+                            </div>
+                        </div>
+                        <div style={{ color: 'var(--text-sub)', fontSize: 10, lineHeight: 1.8 }}>
+                            <div>
+                                Serialization struct:{' '}
+                                <a href="https://github.com/bneb/trytet/blob/main/src/sandbox.rs#L3-L11"
+                                    target="_blank" rel="noopener noreferrer"
+                                    style={{ color: '#007AFF', textDecoration: 'none' }}>
+                                    SnapshotPayload
+                                </a>
+                                {' '}· Wasm bridge:{' '}
+                                <a href="https://github.com/bneb/trytet/blob/main/crates/tet-web/src/lib.rs"
+                                    target="_blank" rel="noopener noreferrer"
+                                    style={{ color: '#007AFF', textDecoration: 'none' }}>
+                                    BrowserEngine
+                                </a>
+                                {' '}· Engine:{' '}
+                                <a href="https://github.com/bneb/trytet/blob/main/src/sandbox/sandbox_wasmtime.rs"
+                                    target="_blank" rel="noopener noreferrer"
+                                    style={{ color: '#007AFF', textDecoration: 'none' }}>
+                                    WasmtimeSandbox
+                                </a>
+                            </div>
+                            <div style={{ marginTop: 4, opacity: 0.7 }}>
+                                Open DevTools → Console to see structured telemetry for every Wasm call.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

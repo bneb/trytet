@@ -21,11 +21,42 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use wasmtime::{Caller, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
+use bincode::Options;
+
+pub const MAX_SNAPSHOT_SIZE: u64 = 50 * 1024 * 1024;
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
 use crate::sandbox::SnapshotPayload;
+
+
+fn validate_range<'a>(memory: &'a wasmtime::Memory, caller: &'a wasmtime::Caller<'_, TetState>, ptr: i32, len: i32) -> wasmtime::Result<&'a [u8]> {
+    let data = memory.data(caller);
+    let start = ptr as usize;
+    let end = start.saturating_add(len as usize);
+    if end > data.len() {
+        return Err(wasmtime::Error::msg("OOB Guest Memory Access"));
+    }
+    Ok(&data[start..end])
+}
+fn validate_range_mut<'a>(memory: &'a wasmtime::Memory, caller: &'a mut wasmtime::Caller<'_, TetState>, ptr: i32, len: i32) -> wasmtime::Result<&'a mut [u8]> {
+    let data = memory.data_mut(caller);
+    let start = ptr as usize;
+    let end = start.saturating_add(len as usize);
+    if end > data.len() {
+        return Err(wasmtime::Error::msg("OOB Guest Memory Mut Access"));
+    }
+    Ok(&mut data[start..end])
+}
+
+pub fn production_engine_config() -> wasmtime::Config {
+    let mut config = wasmtime::Config::new();
+    config.consume_fuel(true);
+    config.cranelift_opt_level(wasmtime::OptLevel::Speed);
+    config.cranelift_nan_canonicalization(true);
+    config
+}
 
 // ---------------------------------------------------------------------------
 // Store State
@@ -82,10 +113,8 @@ impl WasmtimeSandbox {
         local_node_id: String,
         neural_engine: Arc<dyn crate::inference::NeuralEngine>,
     ) -> Result<Self, TetError> {
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true);
-        config.cranelift_opt_level(wasmtime::OptLevel::Speed);
-
+        let config = production_engine_config();
+        
         let engine =
             Engine::new(&config).map_err(|e| TetError::EngineError(format!("{e:#}")))?;
 
@@ -144,10 +173,15 @@ impl WasmtimeSandbox {
             .map_err(|e| TetError::VfsError(format!("Failed to create isolated tempdir: {e}")))?;
 
         if let Some(tarball_bytes) = vfs_to_restore {
-            let mut archive = tar::Archive::new(tarball_bytes);
-            archive
-                .unpack(temp_dir.path())
-                .map_err(|e| TetError::VfsError(format!("Failed to unpack VFS archive: {e}")))?;
+            let path_buf = temp_dir.path().to_path_buf();
+            let tarball_vec = tarball_bytes.to_vec();
+            tokio::task::spawn_blocking(move || {
+                let mut archive = tar::Archive::new(&tarball_vec[..]);
+                archive.unpack(&path_buf)
+            })
+            .await
+            .map_err(|e| TetError::VfsError(format!("Tarball join error: {e}")))?
+            .map_err(|e| TetError::VfsError(format!("Failed to unpack VFS archive: {e}")))?;
         }
 
         for (filename, content) in &req.injected_files {
@@ -190,8 +224,9 @@ impl WasmtimeSandbox {
 
         let mut vector_vfs = crate::memory::VectorVfs::new();
         if let Some(v) = vector_to_restore {
-            if let Ok(restored) = bincode::deserialize::<crate::memory::VectorVfs>(v) {
+            if let Ok(mut restored) = bincode::options().with_limit(MAX_SNAPSHOT_SIZE).deserialize::<crate::memory::VectorVfs>(v) {
                 restored.rebuild_all_indexes(); // Essential for instant-distance!
+                restored.start_background_worker();
                 vector_vfs = restored;
             }
         }
@@ -235,13 +270,8 @@ impl WasmtimeSandbox {
                         _ => return Err(wasmtime::Error::msg("No memory exported")),
                     };
                     
-                    let mem_slice = memory.data(&caller);
-                    
-                    let t_start = target_ptr as usize;
-                    let t_end = t_start + target_len as usize;
-                    if t_end > mem_slice.len() { return Err(wasmtime::Error::msg("Out of bounds")); }
-                    
-                    let target_node = String::from_utf8_lossy(&mem_slice[t_start..t_end]).to_string();
+                    let mem_slice = validate_range(&memory, &caller, target_ptr, target_len)?;
+                    let target_node = String::from_utf8_lossy(mem_slice).to_string();
                     
                     caller.data_mut().migration_requested = true;
                     caller.data_mut().migration_target = Some(target_node);
@@ -257,28 +287,18 @@ impl WasmtimeSandbox {
             .func_wrap_async(
                 "trytet",
                 "invoke",
-                move |mut caller: Caller<'_, TetState>, (target_ptr, target_len, payload_ptr, payload_len, out_ptr, out_len_ptr, fuel): (i32, i32, i32, i32, i32, i32, i64)| {
+                move |mut caller: Caller<'_, TetState>, (target_ptr, target_len, payload_ptr, payload_len, out_ptr, out_len_ptr, fuel): (i32, i32, i32, i32, i32, i32, i64)| -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
                     let source_alias = source_alias.clone();
                     Box::new(async move {
                         // 1. Read pointers from Linear Memory
                         let memory = match caller.get_export("memory") {
                             Some(wasmtime::Extern::Memory(m)) => m,
-                            _ => return 1_i32, // Memory error code
+                            _ => return Err(wasmtime::Error::msg("Memory Error")),
                         };
 
-                        let mem_slice = memory.data(&caller);
-                        
-                        // Extract target alias
-                        let t_start = target_ptr as usize;
-                        let t_end = t_start + target_len as usize;
-                        if t_end > mem_slice.len() { return 1_i32; }
-                        let target_alias = String::from_utf8_lossy(&mem_slice[t_start..t_end]).to_string();
-
-                        // Extract payload
-                        let p_start = payload_ptr as usize;
-                        let p_end = p_start + payload_len as usize;
-                        if p_end > mem_slice.len() { return 1_i32; }
-                        let payload_bytes = mem_slice[p_start..p_end].to_vec();
+                        let target_alias = validate_range(&memory, &caller, target_ptr, target_len)?;
+                        let target_alias = String::from_utf8_lossy(target_alias).to_string();
+                        let payload_bytes = validate_range(&memory, &caller, payload_ptr, payload_len)?.to_vec();
 
                         let mesh = caller.data().mesh.clone();
                         let max_fuel = caller.get_fuel().unwrap_or(0);
@@ -329,24 +349,24 @@ impl WasmtimeSandbox {
                                 // Re-borrow memory because caller was mutated above
                                 let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
 
-                                // Check if guest buffer is large enough
-                                let length_ptr_start = out_len_ptr as usize;
+                                let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
                                 let mut len_buf = [0u8; 4];
-                                len_buf.copy_from_slice(&memory.data(&caller)[length_ptr_start..length_ptr_start+4]);
+                                len_buf.copy_from_slice(len_slice);
                                 let guest_buffer_size = i32::from_le_bytes(len_buf);
 
                                 if response_len > guest_buffer_size {
-                                    // Too small! Inform the guest of the required size.
                                     let required_size = response_len.to_le_bytes();
-                                    memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&required_size);
-                                    success_code = 2_i32; // Buffer too small code
+                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                        m.copy_from_slice(&required_size);
+                                    }
+                                    success_code = 2_i32; 
                                 } else {
-                                    // Valid! Copy the data into the guest.
-                                    let o_start = out_ptr as usize;
-                                    memory.data_mut(&mut caller)[o_start..o_start + response_len as usize].copy_from_slice(&res.return_data);
-                                    
+                                    let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                    m.copy_from_slice(&res.return_data);
                                     let written_size = response_len.to_le_bytes();
-                                    memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&written_size);
+                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                        m.copy_from_slice(&written_size);
+                                    }
                                     
                                     if res.status != ExecutionStatus::Success {
                                         success_code = 3_i32; // Child crashed or ran out of fuel
@@ -369,7 +389,7 @@ impl WasmtimeSandbox {
                             }
                         }
 
-                        success_code
+                        Ok(success_code)
                     })
                 },
             )
@@ -383,30 +403,18 @@ impl WasmtimeSandbox {
         linker.func_wrap_async(
             "trytet",
             "fetch",
-            move |mut caller: Caller<'_, TetState>, (url_ptr, url_len, method_ptr, method_len, body_ptr, body_len, out_ptr, out_len_ptr): (i32, i32, i32, i32, i32, i32, i32, i32)| {
+            move |mut caller: Caller<'_, TetState>, (url_ptr, url_len, method_ptr, method_len, body_ptr, body_len, out_ptr, out_len_ptr): (i32, i32, i32, i32, i32, i32, i32, i32)| -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
                 let http_client = http_client.clone();
                 Box::new(async move {
                     let memory = match caller.get_export("memory") {
                         Some(wasmtime::Extern::Memory(m)) => m,
-                        _ => return Ok(1_i32),
+                        _ => return Err(wasmtime::Error::msg("Memory Error")),
                     };
 
-                    let mem_slice = memory.data(&caller);
-                    
-                    let url_start = url_ptr as usize;
-                    let url_end = url_start + url_len as usize;
-                    if url_end > mem_slice.len() { return Ok(1_i32); }
-                    let target_url = String::from_utf8_lossy(&mem_slice[url_start..url_end]).to_string();
+                    let target_url = String::from_utf8_lossy(validate_range(&memory, &caller, url_ptr, url_len)?).to_string();
+                    let req_method_str = String::from_utf8_lossy(validate_range(&memory, &caller, method_ptr, method_len)?).to_string();
+                    let req_body = validate_range(&memory, &caller, body_ptr, body_len)?.to_vec();
 
-                    let m_start = method_ptr as usize;
-                    let m_end = m_start + method_len as usize;
-                    if m_end > mem_slice.len() { return Ok(1_i32); }
-                    let req_method_str = String::from_utf8_lossy(&mem_slice[m_start..m_end]).to_string();
-
-                    let b_start = body_ptr as usize;
-                    let b_end = b_start + body_len as usize;
-                    if b_end > mem_slice.len() { return Ok(1_i32); }
-                    let req_body = mem_slice[b_start..b_end].to_vec();
 
                     // Security/Filtering
                     let policy = caller.data().egress_policy.clone();
@@ -473,21 +481,24 @@ impl WasmtimeSandbox {
                     // Write response to linear memory if success
                     if success_code == 0 {
                         let response_len = returned_bytes.len() as i32;
-                        let length_ptr_start = out_len_ptr as usize;
+                        let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
                         let mut len_buf = [0u8; 4];
-                        len_buf.copy_from_slice(&memory.data(&caller)[length_ptr_start..length_ptr_start+4]);
+                        len_buf.copy_from_slice(len_slice);
                         let guest_buffer_size = i32::from_le_bytes(len_buf);
 
                         if response_len > guest_buffer_size {
                             let required_size = response_len.to_le_bytes();
-                            memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&required_size);
-                            return Ok(2_i32); // Buffer too small code
+                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                m.copy_from_slice(&required_size);
+                            }
+                            return Ok(2_i32);
                         } else {
-                            let o_start = out_ptr as usize;
-                            memory.data_mut(&mut caller)[o_start..o_start + response_len as usize].copy_from_slice(&returned_bytes);
-                            
+                            let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                            m.copy_from_slice(&returned_bytes);
                             let written_size = response_len.to_le_bytes();
-                            memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&written_size);
+                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                m.copy_from_slice(&written_size);
+                            }
                         }
                     }
                     
@@ -502,26 +513,17 @@ impl WasmtimeSandbox {
             "remember",
             |mut caller: Caller<'_, TetState>,
              (collection_ptr, collection_len, record_ptr, record_len): (i32, i32, i32, i32)|
-             -> Box<dyn std::future::Future<Output = i32> + Send + '_> {
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
                 Box::new(async move {
                     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
                         Some(m) => m,
-                        None => return 1, // Memory error
+                        None => return Err(wasmtime::Error::msg("Memory error")),
                     };
 
-                    let collection_bytes = {
-                        let start = collection_ptr as usize;
-                        let end = start + collection_len as usize;
-                        memory.data(&caller).get(start..end).map(|b| b.to_vec())
-                    };
-                    
-                    let record_bytes = {
-                        let start = record_ptr as usize;
-                        let end = start + record_len as usize;
-                        memory.data(&caller).get(start..end).map(|b| b.to_vec())
-                    };
+                    let cb = validate_range(&memory, &caller, collection_ptr, collection_len)?.to_vec();
+                    let rb = validate_range(&memory, &caller, record_ptr, record_len)?.to_vec();
 
-                    if let (Some(cb), Some(rb)) = (collection_bytes, record_bytes) {
+                    if true {
                         if let Ok(collection_name) = String::from_utf8(cb) {
                             if let Ok(record) = serde_json::from_slice::<crate::memory::VectorRecord>(&rb) {
                                 
@@ -536,17 +538,17 @@ impl WasmtimeSandbox {
                                         let _ = caller.set_fuel(current_fuel - fuel_cost);
                                     } else {
                                         let _ = caller.set_fuel(0);
-                                        return 5; // Out of fuel / traps naturally
+                                        return Ok(5);
                                     }
                                 }
                                 
                                 let vfs = caller.data().vector_vfs.clone();
                                 vfs.remember(&collection_name, record);
-                                return 0; // Success
+                                return Ok(0);
                             }
                         }
                     }
-                    2 // Parse error
+                    Ok(2)
                 })
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::remember: {e:#}")))?;
@@ -556,20 +558,16 @@ impl WasmtimeSandbox {
             "recall",
             |mut caller: Caller<'_, TetState>,
              (query_ptr, query_len, out_ptr, out_len_ptr): (i32, i32, i32, i32)|
-             -> Box<dyn std::future::Future<Output = i32> + Send + '_> {
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
                 Box::new(async move {
                     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
                         Some(m) => m,
-                        None => return 1,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
                     };
 
-                    let query_bytes = {
-                        let start = query_ptr as usize;
-                        let end = start + query_len as usize;
-                        memory.data(&caller).get(start..end).map(|b| b.to_vec())
-                    };
+                    let qb = validate_range(&memory, &caller, query_ptr, query_len)?.to_vec();
 
-                    if let Some(qb) = query_bytes {
+                    if true {
                         if let Ok(query) = serde_json::from_slice::<crate::memory::SearchQuery>(&qb) {
                             
                             let dim = query.query_vector.len() as u64;
@@ -580,7 +578,7 @@ impl WasmtimeSandbox {
                                     let _ = caller.set_fuel(current_fuel - search_cost);
                                 } else {
                                     let _ = caller.set_fuel(0);
-                                    return 5;
+                                    return Ok(5);
                                 }
                             }
                             
@@ -589,28 +587,31 @@ impl WasmtimeSandbox {
                             
                             if let Ok(response_json) = serde_json::to_vec(&results) {
                                 let response_len = response_json.len() as i32;
-                                let length_ptr_start = out_len_ptr as usize;
-                                
+                                let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
                                 let mut len_buf = [0u8; 4];
-                                len_buf.copy_from_slice(&memory.data(&caller)[length_ptr_start..length_ptr_start+4]);
+                                len_buf.copy_from_slice(len_slice);
                                 let guest_buffer_size = i32::from_le_bytes(len_buf);
 
                                 if response_len > guest_buffer_size {
                                     let required_size = response_len.to_le_bytes();
-                                    memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&required_size);
-                                    return 2; // Buffer too small
+                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                        m.copy_from_slice(&required_size);
+                                    }
+                                    return Ok(2); 
                                 } else {
-                                    let o_start = out_ptr as usize;
-                                    memory.data_mut(&mut caller)[o_start..o_start + response_len as usize].copy_from_slice(&response_json);
+                                    let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                    m.copy_from_slice(&response_json);
                                     
                                     let written_size = response_len.to_le_bytes();
-                                    memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&written_size);
-                                    return 0; // Success
+                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                        m.copy_from_slice(&written_size);
+                                    }
+                                    return Ok(0); 
                                 }
                             }
                         }
                     }
-                    3 // Bad input
+                    Ok(3) // Bad input
                 })
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::recall: {e:#}")))?;
@@ -621,26 +622,17 @@ impl WasmtimeSandbox {
             "model_load",
             |mut caller: Caller<'_, TetState>,
              (alias_ptr, alias_len, path_ptr, path_len): (i32, i32, i32, i32)|
-             -> Box<dyn std::future::Future<Output = i32> + Send + '_> {
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
                 Box::new(async move {
                     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
                         Some(m) => m,
-                        None => return 1,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
                     };
 
-                    let alias_bytes = {
-                        let start = alias_ptr as usize;
-                        let end = start + alias_len as usize;
-                        memory.data(&caller).get(start..end).map(|b| b.to_vec())
-                    };
+                    let ab = validate_range(&memory, &caller, alias_ptr, alias_len)?.to_vec();
+                    let pb = validate_range(&memory, &caller, path_ptr, path_len)?.to_vec();
 
-                    let path_bytes = {
-                        let start = path_ptr as usize;
-                        let end = start + path_len as usize;
-                        memory.data(&caller).get(start..end).map(|b| b.to_vec())
-                    };
-
-                    if let (Some(ab), Some(pb)) = (alias_bytes, path_bytes) {
+                    if true {
                         if let (Ok(alias), Ok(path)) = (String::from_utf8(ab), String::from_utf8(pb)) {
                             // Deduct model load fuel cost
                             let load_cost = crate::inference::InferenceFuelCalculator::model_load_cost();
@@ -649,18 +641,18 @@ impl WasmtimeSandbox {
                                     let _ = caller.set_fuel(current_fuel - load_cost);
                                 } else {
                                     let _ = caller.set_fuel(0);
-                                    return 5; // Out of fuel
+                                    return Ok(5); // Out of fuel
                                 }
                             }
 
                             let engine = caller.data().inference_engine.clone();
                             match engine.load_model(&alias, &path).await {
-                                Ok(_) => return 0, // Success
-                                Err(_) => return 3, // Load failed
+                                Ok(_) => return Ok(0), // Success
+                                Err(_) => return Ok(3), // Load failed
                             }
                         }
                     }
-                    2 // Parse error
+                    Ok(2)
                 })
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::model_load: {e:#}")))?;
@@ -671,20 +663,16 @@ impl WasmtimeSandbox {
             "model_predict",
             |mut caller: Caller<'_, TetState>,
              (request_ptr, request_len, out_ptr, out_len_ptr): (i32, i32, i32, i32)|
-             -> Box<dyn std::future::Future<Output = i32> + Send + '_> {
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
                 Box::new(async move {
                     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
                         Some(m) => m,
-                        None => return 1,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
                     };
 
-                    let request_bytes = {
-                        let start = request_ptr as usize;
-                        let end = start + request_len as usize;
-                        memory.data(&caller).get(start..end).map(|b| b.to_vec())
-                    };
+                    let rb = validate_range(&memory, &caller, request_ptr, request_len)?.to_vec();
 
-                    if let Some(rb) = request_bytes {
+                    if true {
                         if let Ok(request) = serde_json::from_slice::<crate::inference::InferenceRequest>(&rb) {
                             let engine = caller.data().inference_engine.clone();
                             let current_fuel = caller.get_fuel().unwrap_or(0);
@@ -702,34 +690,37 @@ impl WasmtimeSandbox {
                                         }
                                     }
 
-                                    // Write response back to Wasm linear memory
                                     if let Ok(response_json) = serde_json::to_vec(&response) {
                                         let response_len = response_json.len() as i32;
-                                        let length_ptr_start = out_len_ptr as usize;
+                                        let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
 
                                         let mut len_buf = [0u8; 4];
-                                        len_buf.copy_from_slice(&memory.data(&caller)[length_ptr_start..length_ptr_start+4]);
+                                        len_buf.copy_from_slice(len_slice);
                                         let guest_buffer_size = i32::from_le_bytes(len_buf);
 
                                         if response_len > guest_buffer_size {
                                             let required_size = response_len.to_le_bytes();
-                                            memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&required_size);
-                                            return 2; // Buffer too small
+                                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                                m.copy_from_slice(&required_size);
+                                            }
+                                            return Ok(2); 
                                         } else {
-                                            let o_start = out_ptr as usize;
-                                            memory.data_mut(&mut caller)[o_start..o_start + response_len as usize].copy_from_slice(&response_json);
+                                            let mut m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                            m.copy_from_slice(&response_json);
 
                                             let written_size = response_len.to_le_bytes();
-                                            memory.data_mut(&mut caller)[length_ptr_start..length_ptr_start+4].copy_from_slice(&written_size);
-                                            return 0; // Success
+                                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                                m.copy_from_slice(&written_size);
+                                            }
+                                            return Ok(0); 
                                         }
                                     }
                                 }
-                                Err(_) => return 4, // Inference failed
+                                Err(_) => return Ok(4), // Inference failed
                             }
                         }
                     }
-                    3 // Bad input
+                    Ok(3) // Bad input
                 })
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::model_predict: {e:#}")))?;
@@ -778,13 +769,6 @@ impl WasmtimeSandbox {
             .unwrap_or_default();
         let memory_used_kb = (memory_snapshot.len() / 1024) as u64;
 
-        let mut archive_bytes = Vec::new();
-        {
-            let mut builder = tar::Builder::new(&mut archive_bytes);
-            let _ = builder.append_dir_all(".", temp_dir.path());
-            let _ = builder.into_inner();
-        }
-
         let mutated_files = Self::capture_workspace(temp_dir.path());
 
         let stdout_bytes = stdout_pipe.contents();
@@ -795,7 +779,17 @@ impl WasmtimeSandbox {
         let stderr_lines = if stderr_str.is_empty() { vec![] } else { stderr_str.lines().map(String::from).collect() };
 
         let vector_vfs = store.data().vector_vfs.clone();
-        let vector_idx = bincode::serialize(&vector_vfs).unwrap_or_default();
+        let path_buf = temp_dir.path().to_path_buf();
+        let (archive_bytes, vector_idx) = tokio::task::spawn_blocking(move || {
+            let mut archive_bytes = Vec::new();
+            {
+                let mut builder = tar::Builder::new(&mut archive_bytes);
+                let _ = builder.append_dir_all(".", path_buf);
+                let _ = builder.into_inner();
+            }
+            let vector_idx = bincode::options().with_limit(MAX_SNAPSHOT_SIZE).serialize(&*vector_vfs).unwrap_or_default();
+            (archive_bytes, vector_idx)
+        }).await.map_err(|e| TetError::EngineError(e.to_string()))?;
 
         // Phase 10: Serialize inference sessions for snapshot
         let inference_state = store.data().inference_engine.serialize_sessions().await;

@@ -91,10 +91,14 @@ pub struct Tier2Data {
     pub index: Option<HnswMap<CosinePoint, String>>,
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct VectorCollection {
     pub tier1: Tier1Data,
-    pub tier2: Arc<std::sync::RwLock<Tier2Data>>,
+    pub tier2: Arc<std::sync::RwLock<Arc<Tier2Data>>>,
+    #[serde(skip)]
+    pub is_compacting: Arc<AtomicBool>,
 }
 
 pub const NUM_SHARDS: usize = 32;
@@ -115,6 +119,8 @@ impl Default for VectorShard {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VectorVfs {
     pub shards: Vec<Arc<VectorShard>>,
+    #[serde(skip)]
+    pub compaction_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl Default for VectorVfs {
@@ -129,7 +135,32 @@ impl VectorVfs {
         for _ in 0..NUM_SHARDS {
             shards.push(Arc::new(VectorShard::default()));
         }
-        Self { shards }
+        let mut vfs = Self { shards, compaction_tx: None };
+        vfs.start_background_worker();
+        vfs
+    }
+
+    pub fn start_background_worker(&mut self) {
+        if self.compaction_tx.is_some() { return; }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        self.compaction_tx = Some(tx);
+        let shards_clone = self.shards.clone();
+        
+        tokio::spawn(async move {
+            while let Some(collection) = rx.recv().await {
+                let mut hasher = AHasher::default();
+                std::hash::Hash::hash(&collection, &mut hasher);
+                let idx = (std::hash::Hasher::finish(&hasher) as usize) % NUM_SHARDS;
+                let shard = shards_clone[idx].clone();
+                let col = match shard.collections.get(&collection) {
+                    Some(c) => c.clone(),
+                    None => continue,
+                };
+                tokio::task::spawn_blocking(move || {
+                    Self::do_compaction(&col);
+                }).await.unwrap();
+            }
+        });
     }
 
     fn get_shard(&self, collection: &str) -> Arc<VectorShard> {
@@ -144,7 +175,11 @@ impl VectorVfs {
         let res = shard
             .collections
             .entry(collection.to_string())
-            .or_insert_with(|| Arc::new(VectorCollection::default()))
+            .or_insert_with(|| Arc::new(VectorCollection {
+                tier1: Tier1Data::default(),
+                tier2: Arc::new(std::sync::RwLock::new(Arc::new(Tier2Data::default()))),
+                is_compacting: Arc::new(AtomicBool::new(false)),
+            }))
             .value()
             .clone();
         res
@@ -180,7 +215,7 @@ impl VectorVfs {
         }
 
         // Scan Tier 2 HNSW Immutable geometric index
-        let t2 = col.tier2.read().unwrap();
+        let t2 = col.tier2.read().unwrap().clone();
         if let Some(idx) = &t2.index {
             let mut search = Search::default();
             let results = idx.search(&qp, &mut search);
@@ -217,10 +252,18 @@ impl VectorVfs {
             .collect()
     }
 
-    /// Merges Tier 1 into Tier 2 via a full rebuilt immutable graph, swapping pointers on finish.
     pub fn compact_collection(&self, collection: &str) {
         let col = self.get_collection(collection);
+        if let Some(tx) = &self.compaction_tx {
+            if !col.is_compacting.swap(true, Ordering::SeqCst) {
+                let _ = tx.send(collection.to_string());
+            }
+        } else {
+            Self::do_compaction(&col);
+        }
+    }
 
+    fn do_compaction(col: &Arc<VectorCollection>) {
         let mut new_records = Vec::new();
         // Remove processed entries from Tier 1 thread-safely
         col.tier1.records.retain(|_, v| {
@@ -229,13 +272,14 @@ impl VectorVfs {
         });
 
         if new_records.is_empty() {
+            col.is_compacting.store(false, Ordering::SeqCst);
             return;
         }
 
         let mut points = Vec::new();
         let mut records = Vec::new();
         {
-            let t2 = col.tier2.read().unwrap();
+            let t2 = col.tier2.read().unwrap().clone();
             points.extend(t2.points.clone());
             records.extend(t2.records.clone());
         }
@@ -248,11 +292,15 @@ impl VectorVfs {
         let v_clone: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
         let new_idx = Builder::default().build(points.clone(), v_clone);
 
-        // Atomic immutable swap into Tier 2
+        // Atomic immutable swap into Tier 2 via Arc replacement
+        let new_tier2 = Arc::new(Tier2Data {
+            points,
+            records,
+            index: Some(new_idx),
+        });
         let mut t2_write = col.tier2.write().unwrap();
-        t2_write.points = points;
-        t2_write.records = records;
-        t2_write.index = Some(new_idx);
+        *t2_write = new_tier2;
+        col.is_compacting.store(false, Ordering::SeqCst);
     }
 
     pub fn rebuild_all_indexes(&self) {
