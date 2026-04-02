@@ -54,9 +54,14 @@ export function Navbar() {
           {/* Invisible spacer to reserve width during the slide */}
           <div className="w-6 h-6 shrink-0" />
         </div>
-        <a href="https://github.com/bneb/trytet" target="_blank" rel="noreferrer">
-          <button className="btn">Get Started</button>
-        </a>
+        <div className="flex items-center gap-3">
+          <a href="/web-demo" className="text-sm font-semibold tracking-wide hover:text-[var(--text-sub)] transition-colors">
+            Live Demo
+          </a>
+          <a href="https://github.com/bneb/trytet" target="_blank" rel="noreferrer">
+            <button className="btn">GitHub</button>
+          </a>
+        </div>
       </div>
     </nav>
   );

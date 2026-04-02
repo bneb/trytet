@@ -1,39 +1,11 @@
 "use client";
-import { SwarmProvider } from '../providers/SwarmProvider';
-import { useSwarm } from '../providers/SwarmProvider';
-import { useTetEngine } from '../hooks/useTetEngine';
-import { useEffect, useState } from 'react';
-
-import { PulseMap } from '../components/PulseMap';
-import { LedgerTerm } from '../components/LedgerTerm';
-import { FuelGauge } from '../components/FuelGauge';
-import { OnboardingModal } from '../components/OnboardingModal';
+import React from 'react';
+import Link from 'next/link';
 import { Navbar } from '../components/Navbar';
-import { AnimatePresence } from 'framer-motion';
 
-function Dashboard() {
-    const { connected, triggerTeleport, lastSnapshotPayload, telemetryFrames } = useSwarm();
-    const engine = useTetEngine();
-    const [showModal, setShowModal] = useState(true);
-
-    useEffect(() => {
-        if (lastSnapshotPayload && engine.initialized) {
-            console.log("Hydrating downloaded snapshot payload! Size: ", lastSnapshotPayload.byteLength);
-            engine.hydrateSnapshot(lastSnapshotPayload);
-        }
-    }, [lastSnapshotPayload, engine.initialized, engine.hydrateSnapshot]);
-
-    const handleHydrate = () => {
-        triggerTeleport("agent-1");
-        setShowModal(false);
-    };
-
+export default function Page() {
     return (
         <div className="flex flex-col min-h-screen relative overflow-x-hidden">
-            <AnimatePresence>
-                {showModal && <OnboardingModal onHydrate={handleHydrate} />}
-            </AnimatePresence>
-
             <Navbar />
 
             <div className="w-full flex justify-center">
@@ -47,10 +19,7 @@ function Dashboard() {
                     </p>
                     
                     <div className="flex items-center gap-4 text-sm font-mono text-[var(--text-sub)]">
-                        STATUS: <span className={connected ? "text-[var(--mint-success)] font-bold" : "text-[var(--text-sub)]"}>
-                            {connected ? 'LINK ESTABLISHED' : 'OFFLINE'}
-                        </span>
-                        {!engine.initialized && !showModal && <span className="text-red-500 bg-red-500/10 px-2 py-1 rounded ml-auto">WASM Offline</span>}
+                        STATUS: <span className="text-[var(--mint-success)] font-bold">LINK ESTABLISHED</span>
                     </div>
                 </header>
             </div>
@@ -58,33 +27,55 @@ function Dashboard() {
             <div className="w-full flex justify-center">
                 <main className="grid grid-cols-12 gap-6 px-5 md:px-10 pb-24 w-full max-w-[1000px]">
                     
-                    {/* Fuel Gauge Card */}
+                    {/* Fuel Gauge Card - Static Representation */}
                     <div className="card col-span-12 md:col-span-6 relative">
                         <div className="label">System Budget (Fuel)</div>
-                        <FuelGauge />
+                        <div className="w-full flex flex-col justify-center h-full">
+                            <div className="font-mono text-[32px] mb-2">72.04%</div>
+                            <div className="fuel-wrap w-full">
+                                <div className="fuel-bar w-full">
+                                    <div className="fuel-fill absolute top-0 left-0 transition-colors w-[72%]" />
+                                </div>
+                            </div>
+                            <div className="flex justify-between text-xs text-[var(--text-sub)] mt-3">
+                                <span>Process ID: trytet-worker-01</span>
+                                <span className="text-[var(--mint-success)]">ACTIVE</span>
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Pulse Map Card */}
+                    {/* Pulse Map Card - Static Representation */}
                     <div className="card col-span-12 md:col-span-6 relative z-0">
                         <div className="label">State Migration Latency</div>
-                        <PulseMap />
+                        <div className="w-full flex flex-col justify-center h-full">
+                            <div className="teleport-stage relative w-full h-[140px] border border-[var(--card-border)]">
+                                <div className="ripple" style={{ animationDelay: '0s' }} />
+                                <div className="ripple" style={{ animationDelay: '0.6s' }} />
+                                <div className="absolute z-20 font-mono text-[11px] font-semibold tracking-widest text-[var(--text-main)] pointer-events-none drop-shadow-md">
+                                    SUB-MS PULSE
+                                </div>
+                            </div>
+                            <div className="flex justify-between text-xs text-[var(--text-sub)] mt-3">
+                                <span>Route: Edge_NYC → Edge_LON</span>
+                                <span className="text-[var(--magenta-teleport)] font-mono">0.34ms</span>
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Code Block / Ledger Term */}
-                    <div className="code-block col-span-12 relative min-h-[300px]">
-                        <LedgerTerm logs={engine.logs} />
+                    {/* Code Block */}
+                    <div className="code-block col-span-12 relative">
+                        <pre><code><span className="comment text-[var(--code-comment)]">// Initialize an ephemeral process with its own budget</span><br/>
+<span className="keyword text-[var(--electric-blue)]">const</span> tet = <span className="keyword text-[var(--electric-blue)]">await</span> Trytet.<span className="function text-[var(--magenta-teleport)]">spawn</span>({'{'}<br/>
+    brain: <span className="string text-[var(--mint-success)]">"neural-v2"</span>,<br/>
+    fuel: <span className="string text-[var(--mint-success)]">5000_UNIT</span><br/>
+{'}'});<br/>
+<br/>
+<span className="comment text-[var(--code-comment)]">// Immediate cross-region state migration</span><br/>
+<span className="keyword text-[var(--electric-blue)]">await</span> tet.<span className="function text-[var(--magenta-teleport)]">teleport</span>(<span className="string text-[var(--mint-success)]">"global-edge-tokyo"</span>);</code></pre>
                     </div>
 
                 </main>
             </div>
         </div>
-    );
-}
-
-export default function Page() {
-    return (
-        <SwarmProvider>
-            <Dashboard />
-        </SwarmProvider>
     );
 }
