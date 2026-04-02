@@ -145,5 +145,35 @@ fn bench_teleport_encode(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_wasm_invoke, bench_vector_vfs, bench_teleport_encode);
+use tet_core::api::context::models::{BlockType, InputContentBlock, SwarmSession};
+use tet_core::api::context::router::{ContextRouter, EvictionStrategy};
+
+fn bench_context_router(c: &mut Criterion) {
+    let mut group = c.benchmark_group("context_router_eviction");
+    group.sample_size(10);
+    
+    // Create a 10,000 block session
+    let mut blocks = vec![InputContentBlock::new(BlockType::System, "SYSTEM".to_string())];
+    for i in 0..10_000 {
+        blocks.push(InputContentBlock::new(
+            if i % 2 == 0 { BlockType::User } else { BlockType::Assistant },
+            "This is a standard length sentence expected in conversational AI histories. It provides enough characters to simulate real context padding.".to_string()
+        ));
+    }
+    
+    group.bench_function("prune_10k_blocks", |b| b.iter(|| {
+        let mut session = SwarmSession {
+            session_id: "bench_session".to_string(),
+            blocks: blocks.clone(),
+        };
+        let router = ContextRouter {
+            max_tokens: 16000,
+            strategy: EvictionStrategy::Hybrid,
+        };
+        let _ = router.optimize(&mut session);
+    }));
+    group.finish();
+}
+
+criterion_group!(benches, bench_wasm_invoke, bench_vector_vfs, bench_teleport_encode, bench_context_router);
 criterion_main!(benches);
