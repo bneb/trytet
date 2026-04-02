@@ -25,8 +25,13 @@ export const SwarmProvider = ({ children }: { children: ReactNode }) => {
     const [lastSnapshotPayload, setLastSnapshotPayload] = useState<Uint8Array | null>(null);
 
     useEffect(() => {
-        // Connect to Fly.io Tet Backend (Assumed local 3000 for development)
-        const socket = new WebSocket('ws://127.0.0.1:3000/v1/swarm/stream');
+        // Connect to Fly.io Tet Backend natively for production
+        const isProd = process.env.NODE_ENV === 'production';
+        const wsUrl = isProd 
+            ? 'wss://trytet-api.fly.dev/v1/swarm/stream' 
+            : 'ws://127.0.0.1:3000/v1/swarm/stream';
+        
+        const socket = new WebSocket(wsUrl);
 
         socket.onopen = () => setConnected(true);
         socket.onclose = () => setConnected(false);
