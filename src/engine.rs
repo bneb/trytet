@@ -129,6 +129,7 @@ impl TetError {
 }
 
 // Implement IntoResponse for ergonomic error handling in Axum handlers.
+#[cfg(not(target_arch = "wasm32"))]
 impl axum::response::IntoResponse for TetError {
     fn into_response(self) -> axum::response::Response {
         let status = axum::http::StatusCode::from_u16(self.status_code())

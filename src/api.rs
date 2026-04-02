@@ -58,6 +58,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/registry/pull/{tag}", axum::routing::get(handle_registry_pull))
         .route("/v1/hive/peers", axum::routing::get(handle_hive_peers))
         .route("/v1/tet/teleport/{alias}", post(handle_teleport))
+        .route("/v1/swarm/stream", axum::routing::get(handle_ws_stream))
         .route("/v1/tet/topup", post(handle_topup))
         .route("/v1/ingress/register", post(handle_ingress_register))
         .route("/ingress/{*path}", axum::routing::any(handle_ingress_proxy))
@@ -417,6 +418,36 @@ pub async fn handle_teleport(
 // ---------------------------------------------------------------------------
 // Ingress Endpoints
 // ---------------------------------------------------------------------------
+
+use axum::extract::ws::{WebSocketUpgrade, WebSocket, Message};
+
+async fn handle_ws_stream(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| async move { handle_socket(socket, state).await })
+}
+
+async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
+    // In a full implementation, we'd listen here for a standard Trytet Stream
+    // of metrics, topology, and Migration requests (SnapshotPayload passing).
+    
+    // For Phase 13 teleportation demo, we'll await a JSON request.
+    while let Some(msg) = socket.recv().await {
+        if let Ok(Message::Text(text)) = msg {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                if json["type"] == "request_teleport" {
+                    let alias = json["alias"].as_str().unwrap_or_default();
+                    if let Ok(payload) = state.sandbox.export_snapshot(alias).await {
+                        if let Ok(bincode_bytes) = bincode::serialize(&payload) {
+                            let _ = socket.send(Message::Binary(bincode_bytes.into())).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 async fn handle_ingress_register(
     State(state): State<Arc<AppState>>,
