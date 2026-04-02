@@ -19,7 +19,7 @@ jobs:
         with:
           toolchain: 1.80.0
       - name: Extract CLI tools
-        run: cargo install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Run Backend Tests
         run: cargo test --workspace
 
