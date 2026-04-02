@@ -28,4 +28,4 @@ curl -sSL https://trytet.com/install.sh | sh
 tet up
 ```
 
-Head over to `trytet.com` to observe the Sovereign Swarm Telemetry in real time!
+Head over to `trytet.com` to observe the Trytet Swarm Telemetry in real time!

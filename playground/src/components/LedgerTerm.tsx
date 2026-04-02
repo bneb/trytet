@@ -39,7 +39,7 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
         fitAddon.fit();
 
         // Print initial mock syntax-highlighted block
-        term.writeln('\x1b[38;2;99;99;102m// Substrate link verified. Listening for telemetry...\x1b[0m');
+        term.writeln('\x1b[38;2;99;99;102m// Core link verified. Awaiting telemetry...\x1b[0m');
         term.writeln('\x1b[38;2;0;122;255mconst\x1b[0m engine = \x1b[38;2;0;122;255mawait\x1b[0m Trytet.\x1b[38;2;175;82;222mconnect\x1b[0m();\r\n');
 
         xtermRef.current = term;
@@ -58,7 +58,7 @@ export function LedgerTerm({ logs }: { logs: string[] }) {
         if (xtermRef.current && logs.length > 0) {
             const lastLog = logs[logs.length - 1];
             // Format incoming string like a telemetry string log
-            xtermRef.current.writeln(`\x1b[38;2;52;199;89m"\x1b[0m\x1b[38;2;142;142;147m[SOVEREIGN] ${lastLog}\x1b[0m\x1b[38;2;52;199;89m"\x1b[0m`);
+            xtermRef.current.writeln(`\x1b[38;2;52;199;89m"\x1b[0m\x1b[38;2;142;142;147m[TRYTET] ${lastLog}\x1b[0m\x1b[38;2;52;199;89m"\x1b[0m`);
         }
     }, [logs]);
 

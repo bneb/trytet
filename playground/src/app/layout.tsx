@@ -13,8 +13,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Trytet | Sovereign Agentic OS",
-  description: "Trytet is the world's first sovereign agentic OS. Built on a sub-millisecond Wasm substrate.",
+  title: "Trytet | Ephemeral AI Runtime",
+  description: "Trytet is an ephemeral, sub-millisecond runtime for AI agents.",
 };
 
 export default function RootLayout({

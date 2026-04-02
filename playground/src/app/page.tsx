@@ -43,7 +43,7 @@ function Dashboard() {
                         <span className="text-[var(--text-sub)]">Zero-trust substrate.</span>
                     </h1>
                     <p className="text-[20px] text-[var(--text-sub)] max-w-[600px] mb-10">
-                        Trytet is the world’s first sovereign agentic OS. Built on a sub-millisecond Wasm substrate where processes teleport, think, and scale independently.
+                        Trytet is an ephemeral, sub-millisecond runtime where AI agents seamlessly migrate, execute, and scale across native boundaries.
                     </p>
                     
                     <div className="flex items-center gap-4 text-sm font-mono text-[var(--text-sub)]">

@@ -30,11 +30,11 @@ export function OnboardingModal({ onHydrate }: Props) {
             <div className="p-2 rounded-lg border border-[var(--card-border)]" style={{ background: 'rgba(0,122,255,0.1)' }}>
               <Zap className="w-6 h-6 text-[var(--electric-blue)]" />
             </div>
-            <h2 className="text-3xl font-bold tracking-tight text-[var(--text-main)]">Sovereign Playground</h2>
+            <h2 className="text-3xl font-bold tracking-tight text-[var(--text-main)]">Trytet Playground</h2>
           </div>
           
           <p className="text-[var(--text-sub)] text-lg leading-relaxed mb-6 font-light">
-            Welcome to the front lines. The moment you loaded this page, an active 51-agent AI swarm was snapshotted on a Fly.io server and seamlessly teleported into your browser's WebWorker via a WebAssembly binary.
+            Welcome. The moment you loaded this page, an active AI swarm was snapshotted from the Trytet backend and seamlessly handed off to your browser's WebAssembly sandbox.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

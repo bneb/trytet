@@ -32,7 +32,7 @@ export function FuelGauge() {
                 </div>
             </div>
             <div className="flex justify-between text-xs text-[var(--text-sub)] mt-3">
-                <span>Process ID: Sovereign-88</span>
+                <span>Process ID: trytet-worker-01</span>
                 <span className={isLow ? 'text-[var(--magenta-teleport)]' : 'text-[var(--mint-success)]'}>
                     {isLow ? 'CRITICAL' : 'ACTIVE'}
                 </span>
