@@ -1,10 +1,10 @@
-use ed25519_dalek::{Keypair, Signature, Signer, Verifier};
-use rand::rngs::OsRng;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use rand::Rng;
 use std::fs;
 use std::path::PathBuf;
 
 pub struct AgentWallet {
-    keypair: Keypair,
+    signing_key: SigningKey,
 }
 
 impl AgentWallet {
@@ -18,25 +18,28 @@ impl AgentWallet {
 
         let key_path = trytet_dir.join("id_ed25519");
 
-        let keypair = if key_path.exists() {
+        let signing_key = if key_path.exists() {
             let bytes = fs::read(&key_path)?;
-            Keypair::from_bytes(&bytes)?
+            let array: [u8; 32] = bytes.as_slice().try_into().map_err(|_| anyhow::anyhow!("Invalid key length"))?;
+            SigningKey::from_bytes(&array)
         } else {
-            let mut csprng = OsRng{};
-            let new_keypair = Keypair::generate(&mut csprng);
-            fs::write(&key_path, new_keypair.to_bytes())?;
-            new_keypair
+            let mut key_bytes = [0u8; 32];
+            rand::rng().fill_bytes(&mut key_bytes);
+            let new_key = SigningKey::from_bytes(&key_bytes);
+            fs::write(&key_path, new_key.to_bytes())?;
+            new_key
         };
 
-        Ok(Self { keypair })
+        Ok(Self { signing_key })
     }
 
     pub fn public_key_hex(&self) -> String {
-        hex::encode(self.keypair.public.as_bytes())
+        let verifying_key = self.signing_key.verifying_key();
+        hex::encode(verifying_key.to_bytes())
     }
 
     pub fn sign_manifest(&self, payload: &[u8]) -> String {
-        let signature = self.keypair.sign(payload);
+        let signature = self.signing_key.sign(payload);
         hex::encode(signature.to_bytes())
     }
 
@@ -45,20 +48,27 @@ impl AgentWallet {
             Ok(b) => b,
             Err(_) => return false,
         };
+        let pub_array: [u8; 32] = match pub_bytes.try_into() {
+            Ok(arr) => arr,
+            Err(_) => return false,
+        };
+
         let sig_bytes = match hex::decode(signature_hex) {
             Ok(b) => b,
             Err(_) => return false,
         };
+        let sig_array: [u8; 64] = match sig_bytes.try_into() {
+            Ok(arr) => arr,
+            Err(_) => return false,
+        };
 
-        let public_key = match ed25519_dalek::PublicKey::from_bytes(&pub_bytes) {
+        let verifying_key = match VerifyingKey::from_bytes(&pub_array) {
             Ok(pk) => pk,
             Err(_) => return false,
         };
-        let signature = match Signature::from_bytes(&sig_bytes) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+        
+        let signature = Signature::from_bytes(&sig_array);
 
-        public_key.verify(payload, &signature).is_ok()
+        verifying_key.verify(payload, &signature).is_ok()
     }
 }

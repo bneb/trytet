@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use wasmtime_wasi::{WasiCtxBuilder, DirPerms, FilePerms};
 use std::path::Path;
 

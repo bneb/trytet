@@ -45,6 +45,12 @@ pub trait TetSandbox: Send + Sync {
     /// Import a snapshot payload directly into the engine's memory, returning the snapshot ID.
     async fn import_snapshot(&self, payload: crate::sandbox::SnapshotPayload) -> Result<String, TetError>;
 
+    /// Phase 9: Query the active Vector-VFS semantic memory of a running/hibernating Tet.
+    async fn query_memory(&self, alias: &str, query: crate::memory::SearchQuery) -> Result<Vec<crate::memory::SearchResult>, TetError>;
+
+    /// Phase 10: Perform neural inference on a Tet's loaded model.
+    async fn infer(&self, alias: &str, request: crate::inference::InferenceRequest, fuel_limit: u64) -> Result<crate::inference::InferenceResponse, TetError>;
+
     /// Forks a previously snapshotted environment into a new, independent Tet instance.
     ///
     /// This is the core "undo" primitive: an agent can snapshot a known-good state,
@@ -60,6 +66,15 @@ pub trait TetSandbox: Send + Sync {
         snapshot_id: &str,
         req: TetExecutionRequest,
     ) -> Result<TetExecutionResult, TetError>;
+
+    /// Extract the live Swarm Topology edge metrics from the Mesh.
+    async fn get_topology(&self) -> Vec<crate::models::TopologyEdge>;
+
+    /// Bridge a direct Call to the native Test-Mesh.
+    async fn send_mesh_call(
+        &self,
+        req: crate::models::MeshCallRequest,
+    ) -> Result<crate::models::MeshCallResponse, TetError>;
 }
 
 /// Errors that can occur at the engine infrastructure level.
@@ -92,6 +107,10 @@ pub enum TetError {
     /// Call stack depth exceeded limit (infinite regression protection).
     #[error("Call stack exhausted")]
     CallStackExhausted,
+
+    /// Neural inference operation failed.
+    #[error("Inference error: {0}")]
+    InferenceError(String),
 }
 
 impl TetError {
@@ -104,6 +123,7 @@ impl TetError {
             TetError::VfsError(_) => 500,
             TetError::MeshError(_) => 502, // Bad Gateway pattern
             TetError::CallStackExhausted => 429, // Too many requests/depth
+            TetError::InferenceError(_) => 500,
         }
     }
 }
@@ -123,6 +143,7 @@ impl axum::response::IntoResponse for TetError {
                 TetError::VfsError(_) => "vfs_error",
                 TetError::MeshError(_) => "mesh_error",
                 TetError::CallStackExhausted => "call_stack_exhausted",
+                TetError::InferenceError(_) => "inference_error",
             }
         });
 

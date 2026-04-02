@@ -1,6 +1,6 @@
 use crate::engine::TetSandbox;
 use crate::models::{ExecutionStatus, MeshCallResponse, TetExecutionRequest, CrashReport};
-use crate::mesh::{MeshMessage, TetMesh};
+use crate::mesh::MeshMessage;
 use crate::sandbox::WasmtimeSandbox;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,6 +47,8 @@ pub fn spawn_mesh_worker(sandbox: Arc<WasmtimeSandbox>, mut rx: mpsc::Receiver<M
                         max_memory_mb: 64, // Sufficient child default
                         parent_snapshot_id: None,
                         call_depth: req.current_depth + 1,
+                        voucher: None,
+                        egress_policy: None,
                     };
 
                     let result = sandbox.execute(execution_req).await;

@@ -46,6 +46,27 @@ pub struct TetExecutionRequest {
     /// Internal property to prevent infinite recursion.
     #[serde(default)]
     pub call_depth: u32,
+
+    /// Optional presentation of a pre-paid compute authorization.
+    #[serde(default)]
+    pub voucher: Option<crate::economy::FuelVoucher>,
+
+    /// The Sovereign Oracle networking egress policy governing outbound external HTTP requests.
+    #[serde(default)]
+    pub egress_policy: Option<crate::oracle::EgressPolicy>,
+}
+
+/// A Swarm Telemetry Edge, mapping the Four Golden Metrics between
+/// natively executing Tet agents inside the memory sandbox via eBPF-inspired topology tracing.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TopologyEdge {
+    pub source: String,
+    pub target: String,
+    pub call_count: u64,
+    pub error_count: u64,
+    pub total_latency_us: u64,
+    pub total_bytes: u64,
+    pub last_seen_ns: u64, // Monotonic time/Epoch time
 }
 
 /// The structured result of a Tet execution.
@@ -73,6 +94,10 @@ pub struct TetExecutionResult {
 
     /// The state of the `/workspace` filesystem after execution finishes.
     pub mutated_files: HashMap<String, String>,
+
+    /// If the status is Migrated, this contains the requested target node ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migrated_to: Option<String>,
 }
 
 /// The terminal state of a Tet execution.
@@ -93,6 +118,9 @@ pub enum ExecutionStatus {
     /// The module trapped (unreachable, div-by-zero, OOB memory access, etc).
     /// The `CrashReport` contains structured diagnostics.
     Crash(CrashReport),
+
+    /// The execution requested a migration and was safely ejected.
+    Migrated,
 }
 
 /// Structured crash diagnostics for LLM consumption.
@@ -168,7 +196,7 @@ pub struct TetMetadata {
     pub wasm_bytes: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TetManifest {
     pub name: String,
     pub version: String,
@@ -177,7 +205,7 @@ pub struct TetManifest {
     pub hashes: TetHashes,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TetHashes {
     pub wasm_hash: String,
     pub memory_hash: String,

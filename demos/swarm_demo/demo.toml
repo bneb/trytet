@@ -1,0 +1,361 @@
+[swarm]
+name = "sovereign-research-swarm"
+
+[[agents]]
+alias = "manager"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 999999999
+[agents.mesh]
+allow_call = ["worker-*"]
+
+[[agents]]
+alias = "worker-1"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-2"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-3"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-4"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-5"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-6"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-7"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-8"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-9"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-10"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-11"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-12"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-13"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-14"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-15"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-16"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-17"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-18"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-19"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-20"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-21"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-22"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-23"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-24"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-25"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-26"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-27"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-28"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-29"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-30"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-31"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-32"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-33"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-34"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-35"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-36"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-37"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-38"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-39"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-40"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-41"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-42"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-43"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-44"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-45"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-46"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-47"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-48"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-49"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000
+
+[[agents]]
+alias = "worker-50"
+base = "../../target/wasm32-wasip1/release/research-agent.wasm"
+entrypoint = "_start"
+[agents.economy]
+max_fuel = 10000000

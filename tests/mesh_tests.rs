@@ -7,8 +7,9 @@ use tet_core::models::{ExecutionStatus, TetExecutionRequest};
 use tet_core::sandbox::WasmtimeSandbox;
 
 fn setup_mesh_sandbox() -> Arc<WasmtimeSandbox> {
-    let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100);
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh).unwrap());
+    let hive_peers = tet_core::hive::HivePeers::new();
+    let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers);
+    let sandbox = Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).unwrap());
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
     sandbox
 }
@@ -37,6 +38,8 @@ async fn test_inter_tet_communication() {
         max_memory_mb: 32,
         parent_snapshot_id: None,
         call_depth: 0,
+        voucher: None,
+        egress_policy: None,
     };
 
     let receiver_result = sandbox.execute(receiver_req).await.unwrap();
@@ -54,6 +57,8 @@ async fn test_inter_tet_communication() {
         max_memory_mb: 32,
         parent_snapshot_id: None,
         call_depth: 0,
+        voucher: None,
+        egress_policy: None,
     };
 
     let caller_result = sandbox.execute(caller_req).await.unwrap();

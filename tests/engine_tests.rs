@@ -11,8 +11,9 @@ use tet_core::models::{ExecutionStatus, TetExecutionRequest, TetExecutionResult}
 use tet_core::sandbox::WasmtimeSandbox;
 
 fn setup_sandbox() -> Arc<WasmtimeSandbox> {
-    let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100);
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh).unwrap());
+    let hive_peers = tet_core::hive::HivePeers::new();
+    let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers);
+    let sandbox = Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).unwrap());
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
     sandbox
 }
@@ -33,6 +34,8 @@ fn make_request(wat: &str, allocated_fuel: u64) -> TetExecutionRequest {
         parent_snapshot_id: None,
         alias: None,
         call_depth: 0,
+        voucher: None,
+        egress_policy: None,
     }
 }
 
@@ -270,6 +273,8 @@ async fn test_env_variables_injected() {
         parent_snapshot_id: None,
         alias: None,
         call_depth: 0,
+        voucher: None,
+        egress_policy: None,
     };
 
     let result = sandbox.execute(req).await.unwrap();
@@ -458,6 +463,8 @@ async fn test_concurrent_executions() {
                 parent_snapshot_id: None,
                 alias: None,
                 call_depth: 0,
+        voucher: None,
+        egress_policy: None,
             };
             sandbox.execute(req).await.unwrap()
         }));

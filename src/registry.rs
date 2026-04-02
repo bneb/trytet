@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub trait Registry: Send + Sync {
     fn push(&self, tag: &str, payload: &[u8]) -> anyhow::Result<()>;

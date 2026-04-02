@@ -23,9 +23,16 @@
 
 pub mod api;
 pub mod crypto;
+pub mod economy;
 pub mod engine;
+pub mod hive;
+pub mod inference;
+pub mod llama_engine;
+pub mod memory;
 pub mod mesh;
 pub mod mesh_worker;
 pub mod models;
+pub mod oracle;
 pub mod registry;
 pub mod sandbox;
+pub mod studio;

@@ -14,8 +14,9 @@ use tet_core::sandbox::WasmtimeSandbox;
 
 #[tokio::test]
 async fn test_vfs_injection_and_extraction() {
-    let (mesh, call_rx) = tet_core::mesh::TetMesh::new(10);
-    let sandbox = std::sync::Arc::new(WasmtimeSandbox::new(mesh).unwrap());
+    let hive_peers = tet_core::hive::HivePeers::new();
+    let (mesh, call_rx) = tet_core::mesh::TetMesh::new(10, hive_peers);
+    let sandbox = std::sync::Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).unwrap());
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
 
     let wasm_bytes = std::fs::read("tests/fixtures/mock_interpreter.wasm")
@@ -33,6 +34,8 @@ async fn test_vfs_injection_and_extraction() {
         parent_snapshot_id: None,
         alias: None,
         call_depth: 0,
+        voucher: None,
+        egress_policy: None,
     };
 
     let result = sandbox.execute(req).await.unwrap();
@@ -73,6 +76,8 @@ async fn test_vfs_injection_and_extraction() {
         parent_snapshot_id: Some(snapshot_id),
         alias: None,
         call_depth: 0,
+        voucher: None,
+        egress_policy: None,
     };
 
     let fork_result = sandbox.fork(&fork_req.parent_snapshot_id.as_ref().unwrap(), fork_req.clone()).await.unwrap();
