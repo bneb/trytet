@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trytet | Ephemeral AI Runtime</title>
+    
+    <!-- Inline Theme Bootstrapper to prevent raw "White Flash" on load -->
+    <script>
+        (function() {
+            try {
+                var localTheme = localStorage.getItem('trytet-theme');
+                var sysTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                var theme = localTheme || sysTheme;
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
+
+    <!-- Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Styles & State -->
+    <link rel="stylesheet" href="styles.css">
+    <script src="theme.js" defer></script>
+</head>
+<body>
+
+    <nav aria-label="Main Navigation">
+        <a href="#" class="nav-brand" aria-label="Trytet Home">
+            <!-- Native CSS Nested Diamond Sigil -->
+            <div class="trytet-sigil" aria-hidden="true">
+                <div class="trytet-substrate"></div>
+                <div class="trytet-core"></div>
+            </div>
+            <span class="brand-text">Trytet</span>
+        </a>
+        
+        <div class="nav-actions">
+            <div class="theme-toggle" id="theme-toggle" role="button" tabindex="0" aria-label="Toggle Light and Dark Mode">
+                <div class="theme-dot">
+                    <!-- Icon inject via SVG depending on preference, dynamically handled in JS, or CSS-only approach using mask if needed. We'll use a unified SVG icon. -->
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+                    </svg>
+                </div>
+            </div>
+            <a href="https://github.com/bneb/trytet" target="_blank" rel="noopener noreferrer">
+                <button class="btn">Get Started</button>
+            </a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <h1>Autonomous execution. <br><span class="text-soft">Zero-trust substrate.</span></h1>
+        <p class="subtitle">Trytet is an ephemeral, sub-millisecond execution runtime where AI agents perfectly migrate, execute, and scale across native boundaries.</p>
+    </header>
+
+    <main class="grid-12">
+        
+        <!-- Dashboard Card 1: Fuel Gauge -->
+        <section class="card" aria-label="System Budget Metric">
+            <div class="card-label">System Budget (Fuel)</div>
+            <div class="fuel-metric">72.04%</div>
+            <div class="fuel-wrap" aria-hidden="true">
+                <div class="fuel-bar">
+                    <div class="fuel-fill"></div>
+                </div>
+            </div>
+            <div class="card-meta">
+                <span>Process ID: trytet-worker-01</span>
+                <span style="color: var(--accent-green); font-weight: 500;">ACTIVE</span>
+            </div>
+        </section>
+
+        <!-- Dashboard Card 2: Teleport Pulse -->
+        <section class="card" aria-label="State Migration Latency Metric">
+            <div class="card-label">State Migration Latency</div>
+            <div class="teleport-stage" aria-hidden="true">
+                <div class="ripple" style="animation-delay: 0s;"></div>
+                <div class="ripple" style="animation-delay: 0.6s;"></div>
+                <div class="pulse-label">SUB-MS PULSE</div>
+            </div>
+            <div class="card-meta">
+                <span>Route: Edge_NYC → Edge_LON</span>
+                <span style="color: var(--accent-magenta); font-family: 'JetBrains Mono', monospace; font-weight: 500;">0.34ms</span>
+            </div>
+        </section>
+
+        <!-- Code Well -->
+        <section class="code-block" aria-label="API Code Example">
+<pre><code><span class="tc-comment">// Initialize an ephemeral process with its own budget</span>
+<span class="tc-keyword">const</span> tet = <span class="tc-keyword">await</span> Trytet.<span class="tc-func">spawn</span>({
+    brain: <span class="tc-string">"neural-v2"</span>,
+    fuel: <span class="tc-string">5000_UNIT</span>
+});
+
+<span class="tc-comment">// Immediate cross-region state migration</span>
+<span class="tc-keyword">await</span> tet.<span class="tc-func">teleport</span>(<span class="tc-string">"global-edge-tokyo"</span>);</code></pre>
+        </section>
+
+    </main>
+
+</body>
+</html>
