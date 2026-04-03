@@ -39,9 +39,15 @@ pub struct InferenceRequest {
     pub deterministic_seed: u64,
 }
 
-fn default_temperature() -> f32 { 0.7 }
-fn default_max_tokens() -> u32 { 256 }
-fn default_seed() -> u64 { 42 }
+fn default_temperature() -> f32 {
+    0.7
+}
+fn default_max_tokens() -> u32 {
+    256
+}
+fn default_seed() -> u64 {
+    42
+}
 
 /// The result of a neural inference operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,8 +92,8 @@ pub struct InferenceSession {
 pub struct ModelInfo {
     pub alias: String,
     pub path: String,
-    pub parameters_b: f32,    // Billions of parameters (estimated)
-    pub context_length: u32,   // Max context window
+    pub parameters_b: f32,   // Billions of parameters (estimated)
+    pub context_length: u32, // Max context window
     pub loaded: bool,
 }
 
@@ -139,7 +145,11 @@ pub trait NeuralEngine: Send + Sync {
 
     /// Perform inference on a loaded model.
     /// `fuel_limit` provides a hard boundary on computation; if generation exceeds this, it traps mid-sentence.
-    async fn predict(&self, request: &InferenceRequest, fuel_limit: u64) -> Result<InferenceResponse, String>;
+    async fn predict(
+        &self,
+        request: &InferenceRequest,
+        fuel_limit: u64,
+    ) -> Result<InferenceResponse, String>;
 
     /// Check if a model is currently loaded.
     async fn is_model_loaded(&self, alias: &str) -> bool;
@@ -198,20 +208,30 @@ impl ModelRegistry {
         self.sessions.read().await.get(session_id).cloned()
     }
 
-    pub async fn get_or_create_session(&self, session_id: &str, model_alias: &str) -> InferenceSession {
+    pub async fn get_or_create_session(
+        &self,
+        session_id: &str,
+        model_alias: &str,
+    ) -> InferenceSession {
         let mut sessions = self.sessions.write().await;
-        sessions.entry(session_id.to_string()).or_insert_with(|| InferenceSession {
-            session_id: session_id.to_string(),
-            model_alias: model_alias.to_string(),
-            prompt_history: Vec::new(),
-            response_history: Vec::new(),
-            current_generation: String::new(),
-            total_tokens: 0,
-        }).clone()
+        sessions
+            .entry(session_id.to_string())
+            .or_insert_with(|| InferenceSession {
+                session_id: session_id.to_string(),
+                model_alias: model_alias.to_string(),
+                prompt_history: Vec::new(),
+                response_history: Vec::new(),
+                current_generation: String::new(),
+                total_tokens: 0,
+            })
+            .clone()
     }
 
     pub async fn update_session(&self, session: InferenceSession) {
-        self.sessions.write().await.insert(session.session_id.clone(), session);
+        self.sessions
+            .write()
+            .await
+            .insert(session.session_id.clone(), session);
     }
 
     pub async fn serialize_sessions(&self) -> Vec<u8> {
@@ -270,7 +290,10 @@ impl MockNeuralEngine {
             "Hello! How can I help you today?".to_string()
         } else {
             // Generic response for unknown prompts
-            format!("I received your prompt of {} characters. Processing complete.", prompt.len())
+            format!(
+                "I received your prompt of {} characters. Processing complete.",
+                prompt.len()
+            )
         };
 
         let tokens = Self::estimate_tokens(&response).min(max_tokens);
@@ -292,7 +315,11 @@ impl NeuralEngine for MockNeuralEngine {
         Ok(info)
     }
 
-    async fn predict(&self, request: &InferenceRequest, fuel_limit: u64) -> Result<InferenceResponse, String> {
+    async fn predict(
+        &self,
+        request: &InferenceRequest,
+        fuel_limit: u64,
+    ) -> Result<InferenceResponse, String> {
         // Verify model is loaded
         if !self.is_model_loaded(&request.model_alias).await {
             return Err(format!("Model '{}' not loaded", request.model_alias));
@@ -303,21 +330,22 @@ impl NeuralEngine for MockNeuralEngine {
         let mut text_generated = String::new();
         let mut trap_reason = None;
         let mut text = String::new();
-        
+
         let (full_text, _desired_tokens) = Self::mock_generate(&request.prompt, request.max_tokens);
-        
+
         // Simulate token by token generation to respect fuel limits
         let words: Vec<&str> = full_text.split_whitespace().collect();
         for word in words {
             let next_chunk = format!("{word} ");
             let chunk_tokens = Self::estimate_tokens(&next_chunk);
-            let next_fuel = InferenceFuelCalculator::calculate(prompt_tokens, tokens_generated + chunk_tokens);
-            
+            let next_fuel =
+                InferenceFuelCalculator::calculate(prompt_tokens, tokens_generated + chunk_tokens);
+
             if next_fuel > fuel_limit {
                 trap_reason = Some("OutOfFuel".to_string());
                 break;
             }
-            
+
             text_generated.push_str(&next_chunk);
             text.push_str(&next_chunk);
             tokens_generated += chunk_tokens;
@@ -326,19 +354,24 @@ impl NeuralEngine for MockNeuralEngine {
         let fuel_burned = InferenceFuelCalculator::calculate(prompt_tokens, tokens_generated);
 
         // Manage session
-        let session_id = request.session_id.clone()
+        let session_id = request
+            .session_id
+            .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        let mut session = self.registry.get_or_create_session(&session_id, &request.model_alias).await;
+        let mut session = self
+            .registry
+            .get_or_create_session(&session_id, &request.model_alias)
+            .await;
         session.prompt_history.push(request.prompt.clone());
-        
+
         if trap_reason.is_none() {
             session.response_history.push(text.clone());
             session.current_generation = String::new();
         } else {
             session.current_generation = text.clone();
         }
-        
+
         session.total_tokens += prompt_tokens + tokens_generated;
         self.registry.update_session(session).await;
 

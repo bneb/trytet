@@ -1,19 +1,21 @@
+use std::sync::Arc;
+use tet_core::economy::VoucherManager;
 use tet_core::hive::{HivePeers, HiveServer};
 use tet_core::mesh::TetMesh;
 use tet_core::sandbox::WasmtimeSandbox;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
-use std::sync::Arc;
-use tet_core::economy::VoucherManager;
 
 #[tokio::test]
 async fn test_hive_deserialization_bomb() {
     let peers = HivePeers::new();
     let server = HiveServer::new(peers.clone());
-    
+
     let (mesh, _rx) = TetMesh::new(100, peers);
     let vm = Arc::new(VoucherManager::new("test_provider".to_string()));
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh.clone(), vm, false, "test_node_id".to_string()).unwrap());
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(mesh.clone(), vm, false, "test_node_id".to_string()).unwrap(),
+    );
 
     // Bind to arbitrary port
     let s_mesh = mesh.clone();
@@ -26,8 +28,10 @@ async fn test_hive_deserialization_bomb() {
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
     // Connect manually
-    let mut stream = TcpStream::connect("127.0.0.1:34599").await.expect("Failed to connect to test server");
-    
+    let mut stream = TcpStream::connect("127.0.0.1:34599")
+        .await
+        .expect("Failed to connect to test server");
+
     // Construct a malicious payload
     // Command is ResolveAlias(String)
     // Tag: 2u32
@@ -47,5 +51,8 @@ async fn test_hive_deserialization_bomb() {
     let mut resp = vec![0; 5];
     let _ = stream.read_exact(&mut resp).await;
     println!("result: {:?}, buf: {:?}, resp: {:?}", res, buf, resp);
-    assert!(res.is_err(), "Server should have dropped the connection due to payload limits");
+    assert!(
+        res.is_err(),
+        "Server should have dropped the connection due to payload limits"
+    );
 }

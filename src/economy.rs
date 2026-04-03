@@ -1,8 +1,8 @@
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
-use ed25519_dalek::{Verifier, Signature, VerifyingKey};
 
 /// Defines a cryptographic authorization to consume Wasm computational fuel.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -51,7 +51,10 @@ impl VoucherManager {
         }
 
         if voucher.provider_id != self.expected_provider_id {
-            return Err(format!("Voucher valid for provider {} but this node is {}", voucher.provider_id, self.expected_provider_id));
+            return Err(format!(
+                "Voucher valid for provider {} but this node is {}",
+                voucher.provider_id, self.expected_provider_id
+            ));
         }
 
         // Verify Cryptographic Signature

@@ -1,6 +1,6 @@
 use crate::engine::TetSandbox;
-use crate::models::{ExecutionStatus, MeshCallResponse, TetExecutionRequest, CrashReport};
 use crate::mesh::MeshMessage;
+use crate::models::{CrashReport, ExecutionStatus, MeshCallResponse, TetExecutionRequest};
 use crate::sandbox::WasmtimeSandbox;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub fn spawn_mesh_worker(sandbox: Arc<WasmtimeSandbox>, mut rx: mpsc::Receiver<M
             match msg {
                 MeshMessage::Call { req, reply } => {
                     let target_alias = req.target_alias.clone();
-                    
+
                     let metadata = match sandbox.mesh.resolve(&target_alias).await {
                         Some(m) => m,
                         None => {
@@ -23,7 +23,10 @@ pub fn spawn_mesh_worker(sandbox: Arc<WasmtimeSandbox>, mut rx: mpsc::Receiver<M
                                 status: ExecutionStatus::Crash(CrashReport {
                                     error_type: "alias_not_found".into(),
                                     instruction_offset: None,
-                                    message: format!("Tet-Mesh could not resolve alias: {}", target_alias),
+                                    message: format!(
+                                        "Tet-Mesh could not resolve alias: {}",
+                                        target_alias
+                                    ),
                                 }),
                                 return_data: vec![],
                                 fuel_used: 0,
@@ -34,20 +37,21 @@ pub fn spawn_mesh_worker(sandbox: Arc<WasmtimeSandbox>, mut rx: mpsc::Receiver<M
 
                     let mut injected_files = HashMap::new();
                     injected_files.insert(
-                        "rpc_payload.json".to_string(), 
-                        String::from_utf8_lossy(&req.payload).to_string()
+                        "rpc_payload.json".to_string(),
+                        String::from_utf8_lossy(&req.payload).to_string(),
                     );
 
                     let execution_req = TetExecutionRequest {
-                        payload: metadata.wasm_bytes.clone(), 
-                        alias: None,   
-                        env: HashMap::new(),
-                        injected_files,
+                        payload: None, // The fork handles the snapshot/wasm inheritance
+                        alias: Some(req.target_alias.clone()),
+                        env: std::collections::HashMap::new(),
+                        injected_files: std::collections::HashMap::new(),
                         allocated_fuel: req.fuel_to_transfer,
-                        max_memory_mb: 64, // Sufficient child default
-                        parent_snapshot_id: None,
+                        max_memory_mb: 64,
+                        parent_snapshot_id: metadata.snapshot_id,
                         call_depth: req.current_depth + 1,
                         voucher: None,
+                        manifest: None,
                         egress_policy: None,
                     };
 

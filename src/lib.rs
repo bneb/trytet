@@ -23,6 +23,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod api;
+pub mod builder;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod crypto;
 pub mod economy;
@@ -43,6 +44,8 @@ pub mod oracle;
 pub mod registry;
 pub mod sandbox;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod studio;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod server;
+pub mod resurrection;
+pub mod teleport;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod studio;

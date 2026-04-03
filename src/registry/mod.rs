@@ -1,3 +1,9 @@
+pub mod oci;
+pub mod cache;
+
+pub use oci::*;
+pub use cache::*;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -18,11 +24,11 @@ impl LocalRegistry {
                 let home_dir = home::home_dir().unwrap_or_else(|| PathBuf::from("."));
                 home_dir.join(".trytet").join("registry")
             });
-        
+
         if !storage_dir.exists() {
             fs::create_dir_all(&storage_dir)?;
         }
-        
+
         Ok(Self { storage_dir })
     }
 

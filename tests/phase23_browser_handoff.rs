@@ -1,13 +1,14 @@
-use tet_core::sandbox::{SnapshotPayload, WasmtimeSandbox};
-use tet_core::mesh::TetMesh;
-use tet_core::economy::VoucherManager;
 use std::sync::Arc;
+use tet_core::economy::VoucherManager;
+use tet_core::mesh::TetMesh;
+use tet_core::sandbox::{SnapshotPayload, WasmtimeSandbox};
 
 #[tokio::test]
 async fn test_phase_23_browser_handoff() {
     let (mesh, _) = TetMesh::new(100, Default::default());
     let voucher_manager = Arc::new(VoucherManager::new("test-provider".to_string()));
-    let _sandbox = WasmtimeSandbox::new(mesh, voucher_manager, false, "test-node".to_string()).unwrap();
+    let _sandbox =
+        WasmtimeSandbox::new(mesh, voucher_manager, false, "test-node".to_string()).unwrap();
 
     let payload = SnapshotPayload {
         memory_bytes: vec![1, 2, 3, 4],
@@ -25,7 +26,10 @@ async fn test_phase_23_browser_handoff() {
     let encoded = bincode::serialize(&payload).unwrap();
     let decoded: SnapshotPayload = bincode::deserialize(&encoded).unwrap();
     assert_eq!(payload.memory_bytes.len(), decoded.memory_bytes.len());
-    
+
     // Simulate browser hand-off completion
-    println!("Phase 23 Phase Handoff Complete! Payload Size: {} bytes", encoded.len());
+    println!(
+        "Phase 23 Phase Handoff Complete! Payload Size: {} bytes",
+        encoded.len()
+    );
 }

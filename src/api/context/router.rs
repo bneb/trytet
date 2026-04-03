@@ -1,5 +1,5 @@
-use super::models::{BlockType, ContextError, InputContentBlock, PruningReport, SwarmSession};
 use super::estimator;
+use super::models::{BlockType, ContextError, InputContentBlock, PruningReport, SwarmSession};
 use tracing::info;
 
 pub enum EvictionStrategy {
@@ -21,14 +21,17 @@ impl ContextRouter {
         }
 
         let initial_estimate = estimator::estimate_tokens(&session.blocks);
-        
+
         if initial_estimate <= self.max_tokens {
             return Ok(PruningReport::NoChange);
         }
 
-        info!("ContextRouter pressure detected: {} > max {} (Phase 13.1)", initial_estimate, self.max_tokens);
+        info!(
+            "ContextRouter pressure detected: {} > max {} (Phase 13.1)",
+            initial_estimate, self.max_tokens
+        );
 
-        let mut current_estimate = initial_estimate;
+        let mut current_estimate;
         let mut blocks_evicted = 0;
 
         // ToolResult Truncation Rule:
@@ -42,11 +45,12 @@ impl ContextRouter {
                 if target_len > block.content.len() {
                     target_len = block.content.len();
                 }
-                
+
                 // Summary substitute truncation
                 let truncation_notice = "... [TRUNCATED BY CONTEXT ROUTER]";
                 if target_len > truncation_notice.len() {
-                    let mut sliced = String::from(&block.content[..target_len - truncation_notice.len()]);
+                    let mut sliced =
+                        String::from(&block.content[..target_len - truncation_notice.len()]);
                     sliced.push_str(truncation_notice);
                     block.content = sliced;
                     block.block_length = estimator::estimate_block(block);
@@ -67,7 +71,7 @@ impl ContextRouter {
         while current_estimate > self.max_tokens {
             // Find candidate to evict
             let candidate_idx = self.find_eviction_candidate(&session.blocks);
-            
+
             if let Some(idx) = candidate_idx {
                 session.blocks.remove(idx);
                 blocks_evicted += 1;
@@ -95,7 +99,8 @@ impl ContextRouter {
             }
             EvictionStrategy::LargeBlockFirst => {
                 // Find the largest non-persistent block
-                blocks.iter()
+                blocks
+                    .iter()
                     .enumerate()
                     .filter(|(_, b)| !b.is_persistent)
                     .max_by_key(|(_, b)| b.block_length)
@@ -103,13 +108,16 @@ impl ContextRouter {
             }
             EvictionStrategy::Hybrid => {
                 // Hybrid: Score = block_length * (1.0 - importance_score)
-                blocks.iter()
+                blocks
+                    .iter()
                     .enumerate()
                     .filter(|(_, b)| !b.is_persistent)
                     .max_by(|(_, a), (_, b)| {
                         let score_a = a.block_length as f32 * (1.0 - a.importance_score);
                         let score_b = b.block_length as f32 * (1.0 - b.importance_score);
-                        score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                        score_a
+                            .partial_cmp(&score_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .map(|(i, _)| i)
             }

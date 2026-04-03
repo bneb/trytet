@@ -6,6 +6,7 @@
 
 use crate::engine::TetSandbox;
 use crate::models::{SnapshotResponse, TetExecutionRequest};
+use crate::sandbox::SnapshotPayload;
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
@@ -13,10 +14,9 @@ use axum::{
     routing::post,
     Json, Router,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
-use crate::sandbox::SnapshotPayload;
 
 pub mod context;
 
@@ -31,6 +31,7 @@ pub mod context;
 pub struct AppState {
     pub sandbox: Arc<dyn TetSandbox>,
     pub registry: Arc<dyn crate::registry::Registry>,
+    pub registry_client: Option<Arc<crate::registry::oci::OciClient>>,
     pub hive: Option<crate::hive::HivePeers>,
     pub ingress_routes: Arc<RwLock<HashMap<String, crate::oracle::IngressRoute>>>,
 }
@@ -54,10 +55,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/tet/execute", post(handle_execute))
         .route("/v1/tet/snapshot/{tet_id}", post(handle_snapshot))
         .route("/v1/tet/fork/{snapshot_id}", post(handle_fork))
-        .route("/v1/tet/export/{snapshot_id}", axum::routing::get(handle_export))
+        .route(
+            "/v1/tet/export/{snapshot_id}",
+            axum::routing::get(handle_export),
+        )
         .route("/v1/tet/import", post(handle_import))
         .route("/v1/registry/push/{tag}", post(handle_registry_push))
-        .route("/v1/registry/pull/{tag}", axum::routing::get(handle_registry_pull))
+        .route(
+            "/v1/registry/pull/{tag}",
+            axum::routing::get(handle_registry_pull),
+        )
         .route("/v1/hive/peers", axum::routing::get(handle_hive_peers))
         .route("/v1/tet/teleport/{alias}", post(handle_teleport))
         .route("/v1/swarm/stream", axum::routing::get(handle_ws_stream))
@@ -68,7 +75,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/tet/infer/{alias}", post(handle_infer))
         .route("/v1/topology", axum::routing::get(handle_topology))
         .route("/v1/swarm/up", post(handle_swarm_up))
-        .route("/health", axum::routing::get(crate::server::health::handle_health))
+        .route(
+            "/health",
+            axum::routing::get(crate::server::health::handle_health),
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024 * 50)) // 50MB limit
         .with_state(state)
 }
@@ -93,7 +103,12 @@ async fn handle_topup(
     // 1. Resolve Local Snapshot ID
     let snapshot_id = match state.sandbox.snapshot(&payload.alias).await {
         Ok(id) => id,
-        Err(_) => return Err((StatusCode::NOT_FOUND, "Alias not active on this Node or has no suspended state".to_string())),
+        Err(_) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                "Alias not active on this Node or has no suspended state".to_string(),
+            ))
+        }
     };
 
     // 2. Prepare fork payload bounded entirely by the new voucher mathematically
@@ -103,10 +118,11 @@ async fn handle_topup(
         env: std::collections::HashMap::new(),
         injected_files: std::collections::HashMap::new(),
         allocated_fuel: payload.voucher.fuel_limit, // The voucher becomes the master parameter implicitly inside the sandbox execution override, but we set it here semantically anyway
-        max_memory_mb: 64, // Inherited usually, static for now
+        max_memory_mb: 64,                          // Inherited usually, static for now
         parent_snapshot_id: Some(snapshot_id.clone()),
         call_depth: 0,
         voucher: Some(payload.voucher),
+        manifest: None,
         egress_policy: None,
     };
 
@@ -119,7 +135,6 @@ async fn handle_topup(
         )),
     }
 }
-
 
 /// POST /v1/tet/execute
 ///
@@ -237,20 +252,7 @@ async fn handle_fork(
     }
 }
 
-/// GET /health
-///
-/// Returns a simple health check response. Used by load balancers
-/// and monitoring systems.
-async fn handle_health() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "status": "operational",
-            "engine": "tet-core",
-            "version": env!("CARGO_PKG_VERSION")
-        })),
-    )
-}
+
 
 async fn handle_export(
     State(state): State<Arc<AppState>>,
@@ -261,7 +263,8 @@ async fn handle_export(
         Err(_) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "Snapshot not found" })),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -273,11 +276,13 @@ async fn handle_import(
         Ok(snapshot_id) => (
             StatusCode::OK,
             Json(serde_json::json!({ "snapshot_id": snapshot_id })),
-        ).into_response(),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -288,10 +293,7 @@ async fn handle_registry_push(
 ) -> Response {
     match state.registry.push(&tag, &bytes) {
         Ok(_) => StatusCode::OK.into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR, 
-            e.to_string()
-        ).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -327,99 +329,79 @@ pub async fn handle_hive_peers(
     }
 }
 
-#[derive(serde::Deserialize)]
-pub struct TeleportRequest {
-    pub target_node: String,
-}
-
 /// POST /v1/tet/teleport/{alias}
 pub async fn handle_teleport(
     State(state): State<Arc<AppState>>,
     Path(alias): Path<String>,
-    Json(req): Json<TeleportRequest>,
+    Json(req_data): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+    let target_node_id = req_data["target_node"].as_str().ok_or_else(|| (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": "Missing target_node"}))
+    ))?;
+
     let hive = match &state.hive {
         Some(h) => h,
-        None => return Err((
-            StatusCode::NOT_IMPLEMENTED,
-            Json(serde_json::json!({
-                "error": "Hive Networking is not enabled on this node",
-                "error_type": "not_implemented"
-            })),
-        )),
+        None => {
+            return Err((
+                StatusCode::NOT_IMPLEMENTED,
+                Json(serde_json::json!({
+                    "error": "Hive Networking is not enabled on this node",
+                    "error_type": "not_implemented"
+                })),
+            ))
+        }
     };
 
-    // 1. Resolve Target Node
-    let target_node = match hive.get_peer(&req.target_node).await {
+    // 1. Resolve Target Node Address
+    let target_node = match hive.get_peer(target_node_id).await {
         Some(n) => n,
-        None => return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": format!("Target node {} not found in local peer list", req.target_node),
-                "error_type": "bad_request"
-            })),
-        )),
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("Target node {} not found in local peer list", target_node_id),
+                    "error_type": "bad_request"
+                })),
+            ))
+        }
     };
 
-    // 2. Snapshot the existing Tet natively
-    let snapshot_id = match state.sandbox.snapshot(&alias).await {
-        Ok(s) => s,
-        Err(e) => return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": format!("Failed to snapshot tet {}: {:?}", alias, e),
-                "error_type": "engine_error"
-            })),
-        )),
+    let teleport_req = crate::teleport::TeleportRequest {
+        agent_id: alias,
+        target_address: target_node.public_addr,
+        use_registry: req_data["use_registry"].as_bool().unwrap_or(false),
     };
 
-    let snapshot = match state.sandbox.export_snapshot(&snapshot_id).await {
-        Ok(s) => s,
-        Err(e) => return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": format!("Snapshot {} not found in local memory: {}", snapshot_id, e),
-                "error_type": "engine_error"
-            })),
-        )),
-    };
-
-    let manifest = crate::models::TetManifest {
-        name: alias.clone(),
-        version: "1.0.0".to_string(),
-        created_at: 0,
-        author_pubkey: "TELEPORT".to_string(),
-        hashes: crate::models::TetHashes {
-            wasm_hash: String::new(),
-            memory_hash: String::new(),
-            vfs_hash: String::new(),
-        },
-    };
-
-    let envelope = crate::hive::TeleportationEnvelope {
-        manifest,
-        snapshot,
-        transfer_token: uuid::Uuid::new_v4().to_string(),
-    };
-
-    let cmd = crate::hive::HiveCommand::MigrateRequest(Box::new(envelope));
-    match crate::hive::HiveClient::rpc_call(&target_node.public_addr, cmd).await {
-        Ok(_) => {
-            // Success, remove locally if we wanted. For now, we leave it since it acts as backup.
+    match teleport_req.execute(state.sandbox.clone(), state.registry_client.clone()).await {
+        Ok(receipt) => {
             Ok(Json(serde_json::json!({
                 "status": "success",
-                "message": format!("Tet {} teleported to {}", alias, target_node.node_id)
+                "message": format!("Teleported {} bytes to {}", receipt.bytes_transferred, receipt.target_address),
+                "receipt": {
+                    "agent_id": receipt.agent_id,
+                    "target": receipt.target_address,
+                    "bytes": receipt.bytes_transferred
+                }
             })))
-        },
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": format!("Failed to transmit teleport envelope: {:?}", e),
-                "error_type": "network_error"
-            })),
-        )),
+        }
+        Err(e) => {
+            let status = match e {
+                crate::teleport::TeleportError::PermissionDenied => StatusCode::FORBIDDEN,
+                crate::teleport::TeleportError::TargetError(_) => StatusCode::BAD_GATEWAY,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            Err((
+                status,
+                Json(serde_json::json!({
+                    "error": e.to_string(),
+                    "error_type": "teleport_error"
+                })),
+            ))
+        }
     }
 }
+
 
 // ---------------------------------------------------------------------------
 // Telemetry Endpoints
@@ -429,7 +411,7 @@ pub async fn handle_teleport(
 // Ingress Endpoints
 // ---------------------------------------------------------------------------
 
-use axum::extract::ws::{WebSocketUpgrade, WebSocket, Message};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 
 async fn handle_ws_stream(
     ws: WebSocketUpgrade,
@@ -441,7 +423,7 @@ async fn handle_ws_stream(
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     // In a full implementation, we'd listen here for a standard Trytet Stream
     // of metrics, topology, and Migration requests (SnapshotPayload passing).
-    
+
     // For Phase 13 teleportation demo, we'll await a JSON request.
     while let Some(msg) = socket.recv().await {
         if let Ok(Message::Text(text)) = msg {
@@ -477,13 +459,19 @@ async fn handle_ingress_proxy(
     let search_path = format!("/{}", path);
     // Find the longest match in registered routes
     let lock = state.ingress_routes.read().await;
-    
-    let route = lock.values().find(|r| search_path.starts_with(&r.public_path)).cloned();
+
+    let route = lock
+        .values()
+        .find(|r| search_path.starts_with(&r.public_path))
+        .cloned();
     drop(lock);
 
     if let Some(r) = route {
         if !r.method_filter.contains(&method.to_string()) && !r.method_filter.is_empty() {
-            return Err((StatusCode::METHOD_NOT_ALLOWED, "Method not allowed for this Trytet Ingress Route".to_string()));
+            return Err((
+                StatusCode::METHOD_NOT_ALLOWED,
+                "Method not allowed for this Trytet Ingress Route".to_string(),
+            ));
         }
 
         // Wrap as Mesh Call
@@ -491,16 +479,19 @@ async fn handle_ingress_proxy(
             target_alias: r.target_alias.clone(),
             method: method.to_string(),
             payload: body.to_vec(),
-            fuel_to_transfer: 10_000_000, 
+            fuel_to_transfer: 10_000_000,
             current_depth: 0,
         };
 
         match state.sandbox.send_mesh_call(req).await {
             Ok(res) => {
                 if res.status != crate::models::ExecutionStatus::Success {
-                    return Err((StatusCode::INTERNAL_SERVER_ERROR, "Target Tet returned an Error Status".to_string()));
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Target Tet returned an Error Status".to_string(),
+                    ));
                 }
-                
+
                 // Return exactly what the agent wrote back to memory natively
                 Ok((StatusCode::OK, res.return_data))
             }
@@ -510,11 +501,16 @@ async fn handle_ingress_proxy(
             }
         }
     } else {
-        Err((StatusCode::NOT_FOUND, "No Trytet Ingress mapped to this path".to_string()))
+        Err((
+            StatusCode::NOT_FOUND,
+            "No Trytet Ingress mapped to this path".to_string(),
+        ))
     }
 }
 
-async fn handle_topology(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, axum::http::StatusCode> {
+async fn handle_topology(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, axum::http::StatusCode> {
     let edges = state.sandbox.get_topology().await;
     Ok(Json(edges))
 }
@@ -527,7 +523,10 @@ async fn handle_memory_query(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     match state.sandbox.query_memory(&alias, query).await {
         Ok(results) => Ok((StatusCode::OK, Json(results))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Memory query failed: {}", e))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Memory query failed: {}", e),
+        )),
     }
 }
 
@@ -539,7 +538,10 @@ async fn handle_infer(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     match state.sandbox.infer(&alias, request, u64::MAX).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Inference failed: {}", e))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Inference failed: {}", e),
+        )),
     }
 }
 
@@ -549,7 +551,7 @@ pub async fn handle_swarm_up(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     // We expect the direct sandbox type for now per architecture
     let sandbox = state.sandbox.clone();
-    
+
     // Attempt to downcast logic (simulated for trytet traits)
     // Since TetSandbox is a trait, we assume the studio orchestrator
     // has access to the raw WasmtimeSandbox for lower level features.
@@ -561,11 +563,15 @@ pub async fn handle_swarm_up(
     };
 
     match orchestrator.up(sandbox).await {
-        Ok(results) => {
-            Ok((StatusCode::OK, Json(serde_json::json!({ "status": "success", "agents_booted": results.len(), "results": results }))))
-        },
-        Err(e) => {
-            Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Orchestration Failed: {}", e)))
-        }
+        Ok(results) => Ok((
+            StatusCode::OK,
+            Json(
+                serde_json::json!({ "status": "success", "agents_booted": results.len(), "results": results }),
+            ),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Orchestration Failed: {}", e),
+        )),
     }
 }

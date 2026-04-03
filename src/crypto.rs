@@ -11,7 +11,7 @@ impl AgentWallet {
     pub fn load_or_create() -> anyhow::Result<Self> {
         let home_dir = home::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let trytet_dir = home_dir.join(".trytet");
-        
+
         if !trytet_dir.exists() {
             fs::create_dir_all(&trytet_dir)?;
         }
@@ -20,7 +20,10 @@ impl AgentWallet {
 
         let signing_key = if key_path.exists() {
             let bytes = fs::read(&key_path)?;
-            let array: [u8; 32] = bytes.as_slice().try_into().map_err(|_| anyhow::anyhow!("Invalid key length"))?;
+            let array: [u8; 32] = bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid key length"))?;
             SigningKey::from_bytes(&array)
         } else {
             let mut key_bytes = [0u8; 32];
@@ -66,7 +69,7 @@ impl AgentWallet {
             Ok(pk) => pk,
             Err(_) => return false,
         };
-        
+
         let signature = Signature::from_bytes(&sig_array);
 
         verifying_key.verify(payload, &signature).is_ok()

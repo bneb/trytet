@@ -19,7 +19,15 @@ use tower::ServiceExt;
 fn test_app() -> axum::Router {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(10, hive_peers.clone());
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).expect("Failed to create sandbox"));
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            mesh,
+            std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())),
+            false,
+            "test".to_string(),
+        )
+        .expect("Failed to create sandbox"),
+    );
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
 
     let state = Arc::new(AppState {
@@ -34,13 +42,18 @@ fn test_app() -> axum::Router {
 fn test_app_with_engine(neural_engine: Arc<dyn tet_core::inference::NeuralEngine>) -> axum::Router {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(10, hive_peers.clone());
-    let sandbox = Arc::new(tet_core::sandbox::WasmtimeSandbox::new_with_engine(
-        mesh,
-        std::sync::Arc::new(tet_core::economy::VoucherManager::new("test-node".to_string())),
-        false, // Mock payment system by default
-        "test-node".to_string(),
-        neural_engine,
-    ).expect("Failed to create sandbox"));
+    let sandbox = Arc::new(
+        tet_core::sandbox::WasmtimeSandbox::new_with_engine(
+            mesh,
+            std::sync::Arc::new(tet_core::economy::VoucherManager::new(
+                "test-node".to_string(),
+            )),
+            false, // Mock payment system by default
+            "test-node".to_string(),
+            neural_engine,
+        )
+        .expect("Failed to create sandbox"),
+    );
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
 
     let state = Arc::new(AppState {
@@ -56,12 +69,15 @@ fn test_app_with_engine(neural_engine: Arc<dyn tet_core::inference::NeuralEngine
 fn test_app_sovereign(node_id: &str) -> axum::Router {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(10, hive_peers.clone());
-    let sandbox = Arc::new(WasmtimeSandbox::new(
-        mesh,
-        std::sync::Arc::new(tet_core::economy::VoucherManager::new(node_id.to_string())),
-        true, // REQUIRE PAYMENT
-        node_id.to_string(),
-    ).expect("Failed to create sandbox"));
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            mesh,
+            std::sync::Arc::new(tet_core::economy::VoucherManager::new(node_id.to_string())),
+            true, // REQUIRE PAYMENT
+            node_id.to_string(),
+        )
+        .expect("Failed to create sandbox"),
+    );
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
 
     let state = Arc::new(AppState {
@@ -278,7 +294,15 @@ async fn test_snapshot_returns_404_for_unknown_tet() {
 async fn test_execute_then_snapshot_then_fork_workflow() {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(10, hive_peers.clone());
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).expect("Failed to create sandbox"));
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            mesh,
+            std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())),
+            false,
+            "test".to_string(),
+        )
+        .expect("Failed to create sandbox"),
+    );
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
 
     let state = Arc::new(AppState {
@@ -349,7 +373,7 @@ async fn test_execute_then_snapshot_then_fork_workflow() {
         voucher: None,
         egress_policy: None,
     };
-    
+
     let app = api::router(state.clone());
     let response = app
         .oneshot(
@@ -399,7 +423,7 @@ async fn test_phase_11_economic_rejection() {
 
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let result: TetExecutionResult = serde_json::from_slice(&body).unwrap();
-    
+
     // Assert strictly crashes
     match result.status {
         tet_core::models::ExecutionStatus::Crash(report) => {
@@ -413,9 +437,9 @@ async fn test_phase_11_economic_rejection() {
 #[tokio::test]
 async fn test_phase_12_ransom_test() {
     // 1. Setup cryptographics
-    use signature::Signer;
     use ed25519_dalek::SigningKey;
     use rand_core::OsRng;
+    use signature::Signer;
     let mut csprng = OsRng;
     let signing_key = SigningKey::generate(&mut csprng);
     let pub_key = signing_key.verifying_key();
@@ -423,8 +447,8 @@ async fn test_phase_12_ransom_test() {
     let node_id = "node_alpha".to_string();
 
     let app = test_app_sovereign(&node_id);
-    
-    // Infinite loop module 
+
+    // Infinite loop module
     let wat = r#"
     (module
         (func $start
@@ -444,9 +468,13 @@ async fn test_phase_12_ransom_test() {
     signed_data.extend_from_slice(agent_id_hex.as_bytes());
     signed_data.extend_from_slice(node_id.as_bytes());
     let fuel_limit: u64 = 5;
-    let expiry_timestamp: u64 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 1000;
+    let expiry_timestamp: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 1000;
     let nonce = "init_nonce_1".to_string();
-    
+
     signed_data.extend_from_slice(&fuel_limit.to_be_bytes());
     signed_data.extend_from_slice(&expiry_timestamp.to_be_bytes());
     signed_data.extend_from_slice(nonce.as_bytes());
@@ -473,7 +501,7 @@ async fn test_phase_12_ransom_test() {
     let res = app.clone().oneshot(axum_req).await.unwrap();
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let result: TetExecutionResult = serde_json::from_slice(&body).unwrap();
-    
+
     assert_eq!(result.status, tet_core::models::ExecutionStatus::OutOfFuel);
 
     // 3. Issue the Top-Up Ransom!
@@ -498,14 +526,16 @@ async fn test_phase_12_ransom_test() {
             expiry_timestamp,
             nonce: topup_nonce,
             signature: topup_signature,
-        }
+        },
     };
 
     let axum_topup = axum::http::Request::builder()
         .method("POST")
         .uri("/v1/tet/topup")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&topup_req).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&topup_req).unwrap(),
+        ))
         .unwrap();
 
     let topup_res = app.oneshot(axum_topup).await.unwrap();
@@ -513,14 +543,20 @@ async fn test_phase_12_ransom_test() {
 
     let topup_body = topup_res.into_body().collect().await.unwrap().to_bytes();
     let topup_result: TetExecutionResult = serde_json::from_slice(&topup_body).unwrap();
-    
-    assert_eq!(topup_result.status, tet_core::models::ExecutionStatus::OutOfFuel);
-    assert!(topup_result.fuel_consumed > 100_000, "Should have burned the top-up fuel limit!");
+
+    assert_eq!(
+        topup_result.status,
+        tet_core::models::ExecutionStatus::OutOfFuel
+    );
+    assert!(
+        topup_result.fuel_consumed > 100_000,
+        "Should have burned the top-up fuel limit!"
+    );
 }
 #[tokio::test]
 async fn test_phase_13_swarm_topographer() {
     let app = test_app();
-    
+
     // Module importing `trytet::invoke` and making a multi-agent RPC
     let wat = r#"
     (module
@@ -572,22 +608,22 @@ async fn test_phase_13_swarm_topographer() {
 
     let body = topo_res.into_body().collect().await.unwrap().to_bytes();
     let edges: Vec<tet_core::models::TopologyEdge> = serde_json::from_slice(&body).unwrap();
-    
+
     assert_eq!(edges.len(), 1, "Expected exactly 1 telemetry edge!");
     let edge = &edges[0];
-    
+
     assert_eq!(edge.source, "AgentSource");
     assert_eq!(edge.target, "AgentTarget");
     assert_eq!(edge.call_count, 1);
     assert_eq!(edge.total_bytes, 10);
-    assert!(edge.total_latency_us > 0); 
+    assert!(edge.total_latency_us > 0);
     assert!(edge.last_seen_ns > 0);
 }
 
 #[tokio::test]
 async fn test_phase_14_secure_egress() {
     let app = test_app();
-    
+
     // Module importing `trytet::fetch`
     let wat = r#"
     (module
@@ -632,34 +668,37 @@ async fn test_phase_14_secure_egress() {
     let res = app.clone().oneshot(axum_req).await.unwrap();
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let result: tet_core::models::TetExecutionResult = serde_json::from_slice(&body).unwrap();
-    
+
     // Assert 1: Domain was not in allow-list, so it should have Crashed with SecurityViolation!
     match &result.status {
         tet_core::models::ExecutionStatus::Crash(cr) => {
             assert_eq!(cr.error_type, "security_violation");
         }
-        _ => panic!("Expected Crash(security_violation), got: {:?}", result.status),
+        _ => panic!(
+            "Expected Crash(security_violation), got: {:?}",
+            result.status
+        ),
     }
 }
 
 #[tokio::test]
 async fn test_phase_15_legacy_bridge() {
     let app = test_app();
-    
+
     // Register the ingress route
     let route = tet_core::oracle::IngressRoute {
         public_path: "/v1/chat".to_string(),
         target_alias: "oracle-agent".to_string(),
         method_filter: vec!["POST".to_string()],
     };
-    
+
     let axum_req = axum::http::Request::builder()
         .method("POST")
         .uri("/v1/ingress/register")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(serde_json::to_vec(&route).unwrap()))
         .unwrap();
-        
+
     let res = app.clone().oneshot(axum_req).await.unwrap();
     assert_eq!(res.status(), 200);
 
@@ -674,7 +713,7 @@ async fn test_phase_15_legacy_bridge() {
         (export "_start" (func $start))
     )
     "#;
-    
+
     // Deploy it
     let mut req = make_request(wat, 5_000_000);
     req.alias = Some("oracle-agent".to_string());
@@ -693,9 +732,13 @@ async fn test_phase_15_legacy_bridge() {
         .header("content-type", "application/json")
         .body(axum::body::Body::from("hello agent!"))
         .unwrap();
-        
+
     let res = app.clone().oneshot(axum_proxy).await.unwrap();
-    assert_eq!(res.status(), 200, "Should successfully proxy to active mesh worker");
+    assert_eq!(
+        res.status(),
+        200,
+        "Should successfully proxy to active mesh worker"
+    );
 }
 
 #[tokio::test]
@@ -718,11 +761,11 @@ async fn test_phase_16_semantic_persistence() {
         (export "_start" (func $start))
     )
     "#;
-    
+
     // 1. Execute parent
     let mut req1 = make_request(wat1, 5_000_000);
     req1.alias = Some("thinker".to_string());
-    
+
     let axum_execute = axum::http::Request::builder()
         .method("POST")
         .uri("/v1/tet/execute")
@@ -739,7 +782,12 @@ async fn test_phase_16_semantic_persistence() {
         .body(axum::body::Body::empty())
         .unwrap();
     let res = app.clone().oneshot(snap_req).await.unwrap();
-    let snap_res: tet_core::models::SnapshotResponse = serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()).unwrap();
+    let snap_res: tet_core::models::SnapshotResponse = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     let parent_snap = snap_res.snapshot_id;
 
     // 3. Fork into new agent
@@ -755,12 +803,14 @@ async fn test_phase_16_semantic_persistence() {
         call_depth: 0,
         egress_policy: None,
     };
-    
+
     let axum_fork = axum::http::Request::builder()
         .method("POST")
         .uri("/v1/tet/execute")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&fork_req).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&fork_req).unwrap(),
+        ))
         .unwrap();
     let res = app.clone().oneshot(axum_fork).await.unwrap();
     assert_eq!(res.status(), 200, "Fork execution failed");
@@ -772,19 +822,30 @@ async fn test_phase_16_semantic_persistence() {
         limit: 1,
         min_score: 0.1, // Relaxed score
     };
-    
+
     let axum_query = axum::http::Request::builder()
         .method("POST")
         .uri("/v1/tet/memory/forked-thinker")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&query_payload).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&query_payload).unwrap(),
+        ))
         .unwrap();
-        
+
     let res = app.clone().oneshot(axum_query).await.unwrap();
     assert_eq!(res.status(), 200, "Memory query failed");
-    
-    let results: Vec<tet_core::memory::SearchResult> = serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()).unwrap();
-    assert_eq!(results.len(), 1, "Expected to find 1 matched semantic result from the snapshot");
+
+    let results: Vec<tet_core::memory::SearchResult> = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        results.len(),
+        1,
+        "Expected to find 1 matched semantic result from the snapshot"
+    );
     assert_eq!(results[0].id, "fact_1", "Expected right matching vector ID");
 }
 
@@ -839,12 +900,24 @@ async fn test_phase_17_sovereign_inference() {
     assert_eq!(res.status(), 200, "Inference execution request failed");
 
     let result: TetExecutionResult = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()
-    ).unwrap();
-    assert_eq!(result.status, tet_core::models::ExecutionStatus::Success, "Agent should succeed: {:?}", result.telemetry);
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        result.status,
+        tet_core::models::ExecutionStatus::Success,
+        "Agent should succeed: {:?}",
+        result.telemetry
+    );
 
     // Fuel should have been consumed (model_load=10000 + inference tokens)
-    assert!(result.fuel_consumed > 10_000, "Should have burned fuel for model load + inference, got: {}", result.fuel_consumed);
+    assert!(
+        result.fuel_consumed > 10_000,
+        "Should have burned fuel for model load + inference, got: {}",
+        result.fuel_consumed
+    );
 
     // Now query the inference endpoint directly via the API
     let infer_request = tet_core::inference::InferenceRequest {
@@ -861,25 +934,41 @@ async fn test_phase_17_sovereign_inference() {
         .method("POST")
         .uri("/v1/tet/infer/brainy-agent")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&infer_request).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&infer_request).unwrap(),
+        ))
         .unwrap();
     let res = app.clone().oneshot(axum_infer).await.unwrap();
     assert_eq!(res.status(), 200, "API inference endpoint failed");
 
     let response: tet_core::inference::InferenceResponse = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()
-    ).unwrap();
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
 
     // The MockNeuralEngine returns "The answer is 4." for prompts containing "2+2"
-    assert!(response.text.contains("4"), "Response should contain '4', got: {}", response.text);
-    assert!(response.tokens_generated > 0, "Should have generated tokens");
+    assert!(
+        response.text.contains("4"),
+        "Response should contain '4', got: {}",
+        response.text
+    );
+    assert!(
+        response.tokens_generated > 0,
+        "Should have generated tokens"
+    );
     assert!(response.fuel_burned > 0, "Should have burned fuel");
 
     // Verify fuel formula: (prompt_tokens * W_IN) + (generated_tokens * W_OUT)
     let expected_fuel = tet_core::inference::InferenceFuelCalculator::calculate(
-        response.prompt_tokens, response.tokens_generated
+        response.prompt_tokens,
+        response.tokens_generated,
     );
-    assert_eq!(response.fuel_burned, expected_fuel, "Fuel should match the deterministic formula");
+    assert_eq!(
+        response.fuel_burned, expected_fuel,
+        "Fuel should match the deterministic formula"
+    );
 }
 
 #[tokio::test]
@@ -927,8 +1016,11 @@ async fn test_phase_18_teleported_thought() {
     let res = app.clone().oneshot(snap_req).await.unwrap();
     assert_eq!(res.status(), 200);
     let snap_res: SnapshotResponse = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()
-    ).unwrap();
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
 
     // Verify the snapshot contains inference_state
     let export_req = axum::http::Request::builder()
@@ -939,9 +1031,15 @@ async fn test_phase_18_teleported_thought() {
     let res = app.clone().oneshot(export_req).await.unwrap();
     assert_eq!(res.status(), 200);
     let payload: tet_core::sandbox::SnapshotPayload = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()
-    ).unwrap();
-    assert!(!payload.inference_state.is_empty(), "Snapshot should contain serialized inference sessions");
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !payload.inference_state.is_empty(),
+        "Snapshot should contain serialized inference sessions"
+    );
 
     // Step 3: Fork into a new agent (simulating teleportation)
     let fork_req = TetExecutionRequest {
@@ -961,7 +1059,9 @@ async fn test_phase_18_teleported_thought() {
         .method("POST")
         .uri("/v1/tet/execute")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&fork_req).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&fork_req).unwrap(),
+        ))
         .unwrap();
     let res = app.clone().oneshot(axum_fork).await.unwrap();
     assert_eq!(res.status(), 200, "Fork/teleport execution failed");
@@ -981,16 +1081,27 @@ async fn test_phase_18_teleported_thought() {
         .method("POST")
         .uri("/v1/tet/infer/teleported-thought")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&infer_request).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&infer_request).unwrap(),
+        ))
         .unwrap();
     let res = app.clone().oneshot(axum_infer).await.unwrap();
     assert_eq!(res.status(), 200, "Teleported inference should succeed");
 
     let response: tet_core::inference::InferenceResponse = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()
-    ).unwrap();
-    assert!(response.text.contains("4"), "Teleported agent should still produce correct inference");
-    assert!(response.fuel_burned > 0, "Teleported inference should consume fuel");
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        response.text.contains("4"),
+        "Teleported agent should still produce correct inference"
+    );
+    assert!(
+        response.fuel_burned > 0,
+        "Teleported inference should consume fuel"
+    );
 }
 
 /// Helper function to asynchronously download the model and display progress.
@@ -1006,7 +1117,7 @@ async fn download_test_model(url: &str, dest_path: &std::path::Path) -> anyhow::
     println!("Downloading test model Qwen2.5 0.5B (350MB)...");
     let response = reqwest::get(url).await?;
     let total_size = response.content_length().unwrap_or(0);
-    
+
     let mut file = std::fs::File::create(dest_path)?;
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
@@ -1038,13 +1149,15 @@ async fn test_phase_17_real_smoke() {
     let model_dir = std::path::PathBuf::from("/tmp/trytet_models");
     std::fs::create_dir_all(&model_dir).unwrap();
     let model_path = model_dir.join("qwen2.5-0.5b-instruct-q4_k_m.gguf");
-    
+
     download_test_model(model_url, &model_path).await.unwrap();
 
     // 2. Initialize Real LlamaEngine
     println!("Initializing LlamaCppEngine and loading model...");
     let engine = std::sync::Arc::new(tet_core::llama_engine::LlamaCppEngine::new());
-    tet_core::inference::NeuralEngine::load_model(&*engine, "qwen", model_path.to_str().unwrap()).await.unwrap();
+    tet_core::inference::NeuralEngine::load_model(&*engine, "qwen", model_path.to_str().unwrap())
+        .await
+        .unwrap();
 
     // 3. Prepare App
     let app = test_app_with_engine(engine.clone());
@@ -1064,22 +1177,27 @@ async fn test_phase_17_real_smoke() {
         .method("POST")
         .uri("/v1/tet/infer/qwen")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(serde_json::to_vec(&infer_request).unwrap()))
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&infer_request).unwrap(),
+        ))
         .unwrap();
 
     let res = app.clone().oneshot(axum_infer).await.unwrap();
     assert_eq!(res.status(), 200, "Execute failed");
 
     let inf_res: tet_core::inference::InferenceResponse = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), 1024*1024).await.unwrap()
-    ).unwrap();
-    
+        &axum::body::to_bytes(res.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
     println!("Neural Output:");
     println!("Prompt: The capital of France is ");
     println!("Response: {}", inf_res.text);
     println!("Fuel Burned: {}", inf_res.fuel_burned);
     println!("Generated Tokens: {}", inf_res.tokens_generated);
-    
+
     assert!(inf_res.text.len() > 0, "Model should generate some text");
     assert!(inf_res.fuel_burned > 0, "Engine did not register fuel burn");
 }

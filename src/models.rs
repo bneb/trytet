@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod manifest;
+
 /// A request to instantiate and execute a Tet sandbox.
 ///
 /// The payload is a raw WebAssembly binary (not base64 — raw bytes serialized
@@ -50,6 +52,7 @@ pub struct TetExecutionRequest {
     /// Optional presentation of a pre-paid compute authorization.
     #[serde(default)]
     pub voucher: Option<crate::economy::FuelVoucher>,
+    pub manifest: Option<crate::models::manifest::AgentManifest>,
 
     /// The Sovereign Oracle networking egress policy governing outbound external HTTP requests.
     #[serde(default)]

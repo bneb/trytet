@@ -1,8 +1,8 @@
-use tet_core::sandbox::{WasmtimeSandbox, SnapshotPayload};
-use tet_core::mesh::TetMesh;
-use tet_core::engine::TetSandbox;
-use tet_core::models::TetExecutionRequest;
 use std::sync::Arc;
+use tet_core::engine::TetSandbox;
+use tet_core::mesh::TetMesh;
+use tet_core::models::TetExecutionRequest;
+use tet_core::sandbox::{SnapshotPayload, WasmtimeSandbox};
 use tokio::time::{sleep, Duration, Instant};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -10,7 +10,9 @@ async fn test_tar_extraction_starvation() {
     let peers = tet_core::hive::HivePeers::new();
     let (mesh, _rx) = TetMesh::new(100, peers);
     let vm = Arc::new(tet_core::economy::VoucherManager::new("test".to_string()));
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh.clone(), vm, false, "test_node_id".to_string()).unwrap());
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(mesh.clone(), vm, false, "test_node_id".to_string()).unwrap(),
+    );
 
     // Create a dummy large tarball (e.g., 20MB of zeroes)
     let mut tar_bytes = Vec::new();
@@ -52,7 +54,7 @@ async fn test_tar_extraction_starvation() {
     };
 
     let sandbox_clone = sandbox.clone();
-    
+
     // Spawn a rigid interval timer to detect starvation
     let task_timer = tokio::spawn(async move {
         let mut max_jitter = Duration::from_secs(0);
@@ -74,8 +76,11 @@ async fn test_tar_extraction_starvation() {
     let _ = sandbox_clone.fork(&snap_id, req).await;
 
     let max_jitter = task_timer.await.unwrap();
-    
+
     // Make sure our background async tasks weren't starved by sync tar unpack
     println!("Max jitter during extraction: {:?}", max_jitter);
-    assert!(max_jitter < Duration::from_millis(500), "Timer was completely starved by synchronous VFS extraction!");
+    assert!(
+        max_jitter < Duration::from_millis(500),
+        "Timer was completely starved by synchronous VFS extraction!"
+    );
 }

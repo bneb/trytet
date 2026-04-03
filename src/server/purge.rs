@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 use tokio::time;
 
 pub async fn spawn_purge_thread() {
@@ -25,7 +25,11 @@ pub async fn spawn_purge_thread() {
                             if let Ok(age) = now.duration_since(modified) {
                                 if age.as_secs() > 24 * 3600 {
                                     if let Err(e) = std::fs::remove_file(entry.path()) {
-                                        tracing::warn!("Failed to purge file {:?}: {}", entry.path(), e);
+                                        tracing::warn!(
+                                            "Failed to purge file {:?}: {}",
+                                            entry.path(),
+                                            e
+                                        );
                                     } else {
                                         tracing::info!("Purged stale snapshot: {:?}", entry.path());
                                     }

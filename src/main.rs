@@ -39,17 +39,20 @@ async fn main() -> anyhow::Result<()> {
     // -- Initialize the pre-warmed sandbox, Hive Peers, and Tet-Mesh -------------------------
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers.clone());
-    
+
     let hive_server = tet_core::hive::HiveServer::new(hive_peers.clone());
     let mesh_clone = mesh.clone();
 
     let local_node_id = uuid::Uuid::new_v4().to_string(); // In a real node, load from config
-    let voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(local_node_id.clone()));
-    let sandbox = WasmtimeSandbox::new(mesh, voucher_manager, true, local_node_id).expect("Failed to initialize Wasmtime engine");
+    let voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(
+        local_node_id.clone(),
+    ));
+    let sandbox = WasmtimeSandbox::new(mesh, voucher_manager, true, local_node_id)
+        .expect("Failed to initialize Wasmtime engine");
     tracing::info!("Wasmtime engine pre-warmed with async support and Wasm Fuel enabled");
 
     let sandbox = Arc::new(sandbox);
-    
+
     // Spawn Hive P2P Server
     let hive_sandbox = sandbox.clone();
     tokio::spawn(async move {
@@ -70,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         sandbox: sandbox.clone(),
         registry,
+        registry_client: None, // Default to None for now
         hive: Some(hive_peers),
         ingress_routes: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     });

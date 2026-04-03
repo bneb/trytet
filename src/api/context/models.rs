@@ -26,7 +26,7 @@ impl InputContentBlock {
             BlockType::Assistant => 0.5,
             BlockType::ToolResult => 0.2, // Lowest priority default
         };
-        
+
         Self {
             block_type,
             content,

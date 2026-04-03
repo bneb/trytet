@@ -13,15 +13,15 @@ use crate::models::{
     TetExecutionResult, TetMetadata,
 };
 use async_trait::async_trait;
-use std::collections::HashMap;
+use bincode::Options;
+
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use wasmtime::{Caller, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
-use bincode::Options;
 
 pub const MAX_SNAPSHOT_SIZE: u64 = 50 * 1024 * 1024;
 use wasmtime_wasi::p1::WasiP1Ctx;
@@ -30,8 +30,12 @@ use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
 use crate::sandbox::SnapshotPayload;
 
-
-fn validate_range<'a>(memory: &'a wasmtime::Memory, caller: &'a wasmtime::Caller<'_, TetState>, ptr: i32, len: i32) -> wasmtime::Result<&'a [u8]> {
+fn validate_range<'a>(
+    memory: &'a wasmtime::Memory,
+    caller: &'a wasmtime::Caller<'_, TetState>,
+    ptr: i32,
+    len: i32,
+) -> wasmtime::Result<&'a [u8]> {
     let data = memory.data(caller);
     let start = ptr as usize;
     let end = start.saturating_add(len as usize);
@@ -40,7 +44,12 @@ fn validate_range<'a>(memory: &'a wasmtime::Memory, caller: &'a wasmtime::Caller
     }
     Ok(&data[start..end])
 }
-fn validate_range_mut<'a>(memory: &'a wasmtime::Memory, caller: &'a mut wasmtime::Caller<'_, TetState>, ptr: i32, len: i32) -> wasmtime::Result<&'a mut [u8]> {
+fn validate_range_mut<'a>(
+    memory: &'a wasmtime::Memory,
+    caller: &'a mut wasmtime::Caller<'_, TetState>,
+    ptr: i32,
+    len: i32,
+) -> wasmtime::Result<&'a mut [u8]> {
     let data = memory.data_mut(caller);
     let start = ptr as usize;
     let end = start.saturating_add(len as usize);
@@ -67,7 +76,8 @@ struct TetState {
     limits: StoreLimits,
     mesh: TetMesh,
     call_stack_depth: u32,
-    fuel_to_burn_from_parent: u64, // Used to communicate back how much child spent
+    fuel_to_burn_from_parent: u64,
+    pub manifest: crate::models::manifest::AgentManifest,
     pub migration_requested: bool,
     pub migration_target: Option<String>,
     pub egress_policy: Option<crate::oracle::EgressPolicy>,
@@ -82,7 +92,7 @@ struct TetState {
 pub struct WasmtimeSandbox {
     engine: Engine,
     snapshots: Arc<RwLock<HashMap<String, SnapshotPayload>>>,
-    active_memories: Arc<RwLock<HashMap<String, SnapshotPayload>>>,
+    active_memories: Arc<RwLock<HashMap<String, (SnapshotPayload, crate::models::manifest::AgentManifest)>>>,
     pub mesh: TetMesh,
     pub voucher_manager: Arc<crate::economy::VoucherManager>,
     pub require_payment: bool,
@@ -114,9 +124,8 @@ impl WasmtimeSandbox {
         neural_engine: Arc<dyn crate::inference::NeuralEngine>,
     ) -> Result<Self, TetError> {
         let config = production_engine_config();
-        
-        let engine =
-            Engine::new(&config).map_err(|e| TetError::EngineError(format!("{e:#}")))?;
+
+        let engine = Engine::new(&config).map_err(|e| TetError::EngineError(format!("{e:#}")))?;
 
         Ok(Self {
             engine,
@@ -147,6 +156,27 @@ impl WasmtimeSandbox {
             }
         }
         files
+    }
+
+    pub async fn boot_artifact(
+        &self,
+        wasm_bytes: &[u8],
+        req: &TetExecutionRequest,
+        vfs_tarball: Option<&[u8]>,
+    ) -> Result<(TetExecutionResult, crate::sandbox::SnapshotPayload), TetError> {
+        Self::execute_inner(
+            &self.engine,
+            &self.mesh,
+            wasm_bytes,
+            req,
+            None,
+            vfs_tarball,
+            None,
+            None,
+            self.neural_engine.clone(),
+            req.call_depth,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -187,8 +217,9 @@ impl WasmtimeSandbox {
         for (filename, content) in &req.injected_files {
             let safe_filename = Path::new(filename).file_name().unwrap_or_default();
             let file_path = temp_dir.path().join(safe_filename);
-            fs::write(file_path, content)
-                .map_err(|e| TetError::VfsError(format!("Failed to inject file '{filename}': {e}")))?;
+            fs::write(file_path, content).map_err(|e| {
+                TetError::VfsError(format!("Failed to inject file '{filename}': {e}"))
+            })?;
         }
 
         let module = Module::new(engine, wasm_bytes)
@@ -224,7 +255,10 @@ impl WasmtimeSandbox {
 
         let mut vector_vfs = crate::memory::VectorVfs::new();
         if let Some(v) = vector_to_restore {
-            if let Ok(mut restored) = bincode::options().with_limit(MAX_SNAPSHOT_SIZE).deserialize::<crate::memory::VectorVfs>(v) {
+            if let Ok(mut restored) = bincode::options()
+                .with_limit(MAX_SNAPSHOT_SIZE)
+                .deserialize::<crate::memory::VectorVfs>(v)
+            {
                 restored.rebuild_all_indexes(); // Essential for instant-distance!
                 restored.start_background_worker();
                 vector_vfs = restored;
@@ -244,6 +278,22 @@ impl WasmtimeSandbox {
             mesh: mesh.clone(),
             call_stack_depth: call_depth,
             fuel_to_burn_from_parent: 0,
+            manifest: req.manifest.clone().unwrap_or_else(|| crate::models::manifest::AgentManifest {
+                metadata: crate::models::manifest::Metadata {
+                    name: req.alias.clone().unwrap_or_default(),
+                    version: "0.0.0".to_string(),
+                    author_pubkey: Some("UNKNOWN".to_string()),
+                },
+                constraints: crate::models::manifest::ResourceConstraints {
+                    max_memory_pages: 1024,
+                    fuel_limit: 1_000_000,
+                },
+                permissions: crate::models::manifest::CapabilityPolicy {
+                    can_egress: vec![],
+                    can_persist: false,
+                    can_teleport: false,
+                },
+            }),
             migration_requested: false,
             migration_target: None,
             egress_policy: req.egress_policy.clone(),
@@ -256,8 +306,10 @@ impl WasmtimeSandbox {
         store.set_fuel(req.allocated_fuel).unwrap();
 
         let mut linker: Linker<TetState> = Linker::new(engine);
-        wasmtime_wasi::p1::add_to_linker_async(&mut linker, |state: &mut TetState| &mut state.wasi_p1)
-            .map_err(|e| TetError::EngineError(format!("WASI linking failed: {e:#}")))?;
+        wasmtime_wasi::p1::add_to_linker_async(&mut linker, |state: &mut TetState| {
+            &mut state.wasi_p1
+        })
+        .map_err(|e| TetError::EngineError(format!("WASI linking failed: {e:#}")))?;
 
         // Phase 3: Custom Inter-Tet RPC Host Function
         linker.func_wrap_async(
@@ -281,13 +333,28 @@ impl WasmtimeSandbox {
             }
         ).map_err(|e| TetError::EngineError(format!("Linking request_migration failed: {e:#}")))?;
 
-        let source_alias = req.alias.clone().unwrap_or_else(|| "anonymous_tet".to_string());
+        let source_alias = req
+            .alias
+            .clone()
+            .unwrap_or_else(|| "anonymous_tet".to_string());
 
         linker
             .func_wrap_async(
                 "trytet",
                 "invoke",
-                move |mut caller: Caller<'_, TetState>, (target_ptr, target_len, payload_ptr, payload_len, out_ptr, out_len_ptr, fuel): (i32, i32, i32, i32, i32, i32, i64)| -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                move |mut caller: Caller<'_, TetState>,
+                      (
+                    target_ptr,
+                    target_len,
+                    payload_ptr,
+                    payload_len,
+                    out_ptr,
+                    out_len_ptr,
+                    fuel,
+                ): (i32, i32, i32, i32, i32, i32, i64)|
+                      -> Box<
+                    dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_,
+                > {
                     let source_alias = source_alias.clone();
                     Box::new(async move {
                         // 1. Read pointers from Linear Memory
@@ -296,13 +363,19 @@ impl WasmtimeSandbox {
                             _ => return Err(wasmtime::Error::msg("Memory Error")),
                         };
 
-                        let target_alias = validate_range(&memory, &caller, target_ptr, target_len)?;
+                        let target_alias =
+                            validate_range(&memory, &caller, target_ptr, target_len)?;
                         let target_alias = String::from_utf8_lossy(target_alias).to_string();
-                        let payload_bytes = validate_range(&memory, &caller, payload_ptr, payload_len)?.to_vec();
+                        let payload_bytes =
+                            validate_range(&memory, &caller, payload_ptr, payload_len)?.to_vec();
 
                         let mesh = caller.data().mesh.clone();
                         let max_fuel = caller.get_fuel().unwrap_or(0);
-                        let fuel_to_transfer = if (fuel as u64) > max_fuel { max_fuel } else { fuel as u64 };
+                        let fuel_to_transfer = if (fuel as u64) > max_fuel {
+                            max_fuel
+                        } else {
+                            fuel as u64
+                        };
 
                         let call_req = MeshCallRequest {
                             target_alias: target_alias.clone(),
@@ -337,7 +410,14 @@ impl WasmtimeSandbox {
                         }
 
                         // Flush the native telemetry hook into the memory mesh
-                        mesh.record_telemetry(source_alias, target_alias, req_bytes + res_bytes, elapsed_us, is_error).await;
+                        mesh.record_telemetry(
+                            source_alias,
+                            target_alias,
+                            req_bytes + res_bytes,
+                            elapsed_us,
+                            is_error,
+                        )
+                        .await;
 
                         match response {
                             Ok(res) => {
@@ -345,9 +425,10 @@ impl WasmtimeSandbox {
                                 caller.data_mut().fuel_to_burn_from_parent += res.fuel_used;
 
                                 let response_len = res.return_data.len() as i32;
-                                
+
                                 // Re-borrow memory because caller was mutated above
-                                let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
+                                let memory =
+                                    caller.get_export("memory").unwrap().into_memory().unwrap();
 
                                 let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
                                 let mut len_buf = [0u8; 4];
@@ -356,18 +437,27 @@ impl WasmtimeSandbox {
 
                                 if response_len > guest_buffer_size {
                                     let required_size = response_len.to_le_bytes();
-                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                    if let Ok(m) =
+                                        validate_range_mut(&memory, &mut caller, out_len_ptr, 4)
+                                    {
                                         m.copy_from_slice(&required_size);
                                     }
-                                    success_code = 2_i32; 
+                                    success_code = 2_i32;
                                 } else {
-                                    let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                    let m = validate_range_mut(
+                                        &memory,
+                                        &mut caller,
+                                        out_ptr,
+                                        response_len,
+                                    )?;
                                     m.copy_from_slice(&res.return_data);
                                     let written_size = response_len.to_le_bytes();
-                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                    if let Ok(m) =
+                                        validate_range_mut(&memory, &mut caller, out_len_ptr, 4)
+                                    {
                                         m.copy_from_slice(&written_size);
                                     }
-                                    
+
                                     if res.status != ExecutionStatus::Success {
                                         success_code = 3_i32; // Child crashed or ran out of fuel
                                     }
@@ -393,7 +483,9 @@ impl WasmtimeSandbox {
                     })
                 },
             )
-            .map_err(|e| TetError::EngineError(format!("Failed to register trytet::invoke: {e:#}")))?;
+            .map_err(|e| {
+                TetError::EngineError(format!("Failed to register trytet::invoke: {e:#}"))
+            })?;
 
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
@@ -734,8 +826,7 @@ impl WasmtimeSandbox {
             if let Some(memory) = instance.get_memory(&mut store, "memory") {
                 let current_size = memory.data_size(&store);
                 if snapshot_bytes.len() > current_size {
-                    let pages_needed =
-                        (snapshot_bytes.len() - current_size).div_ceil(65536) as u64;
+                    let pages_needed = (snapshot_bytes.len() - current_size).div_ceil(65536) as u64;
                     memory.grow(&mut store, pages_needed).map_err(|e| {
                         TetError::EngineError(format!("Memory grow for fork failed: {e:#}"))
                     })?;
@@ -775,8 +866,16 @@ impl WasmtimeSandbox {
         let stderr_bytes = stderr_pipe.contents();
         let stdout_str = String::from_utf8_lossy(&stdout_bytes);
         let stderr_str = String::from_utf8_lossy(&stderr_bytes);
-        let stdout_lines = if stdout_str.is_empty() { vec![] } else { stdout_str.lines().map(String::from).collect() };
-        let stderr_lines = if stderr_str.is_empty() { vec![] } else { stderr_str.lines().map(String::from).collect() };
+        let stdout_lines = if stdout_str.is_empty() {
+            vec![]
+        } else {
+            stdout_str.lines().map(String::from).collect()
+        };
+        let stderr_lines = if stderr_str.is_empty() {
+            vec![]
+        } else {
+            stderr_str.lines().map(String::from).collect()
+        };
 
         let vector_vfs = store.data().vector_vfs.clone();
         let path_buf = temp_dir.path().to_path_buf();
@@ -787,9 +886,14 @@ impl WasmtimeSandbox {
                 let _ = builder.append_dir_all(".", path_buf);
                 let _ = builder.into_inner();
             }
-            let vector_idx = bincode::options().with_limit(MAX_SNAPSHOT_SIZE).serialize(&*vector_vfs).unwrap_or_default();
+            let vector_idx = bincode::options()
+                .with_limit(MAX_SNAPSHOT_SIZE)
+                .serialize(&*vector_vfs)
+                .unwrap_or_default();
             (archive_bytes, vector_idx)
-        }).await.map_err(|e| TetError::EngineError(e.to_string()))?;
+        })
+        .await
+        .map_err(|e| TetError::EngineError(e.to_string()))?;
 
         // Phase 10: Serialize inference sessions for snapshot
         let inference_state = store.data().inference_engine.serialize_sessions().await;
@@ -854,7 +958,10 @@ impl TetSandbox for WasmtimeSandbox {
             };
 
             if let Some(msg) = violation {
-                let tet_id = req.alias.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let tet_id = req
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 return Ok(TetExecutionResult {
                     tet_id,
                     status: crate::models::ExecutionStatus::Crash(crate::models::CrashReport {
@@ -893,10 +1000,16 @@ impl TetSandbox for WasmtimeSandbox {
             (None, None) => return Err(TetError::EngineError("No Wasm payload provided".into())),
         };
 
-        let (mem_to_restore, vfs_to_restore, vec_to_restore, inf_to_restore) = match &parent_snapshot {
-            Some(p) => (Some(p.memory_bytes.as_slice()), Some(p.fs_tarball.as_slice()), Some(p.vector_idx.as_slice()), Some(p.inference_state.as_slice())),
-            None => (None, None, None, None),
-        };
+        let (mem_to_restore, vfs_to_restore, vec_to_restore, inf_to_restore) =
+            match &parent_snapshot {
+                Some(p) => (
+                    Some(p.memory_bytes.as_slice()),
+                    Some(p.fs_tarball.as_slice()),
+                    Some(p.vector_idx.as_slice()),
+                    Some(p.inference_state.as_slice()),
+                ),
+                None => (None, None, None, None),
+            };
 
         // Pure async call — natively yields to Tokio via wasmtime async support!
         let (result, snapshot_payload) = Self::execute_inner(
@@ -910,16 +1023,35 @@ impl TetSandbox for WasmtimeSandbox {
             inf_to_restore,
             self.neural_engine.clone(),
             req.call_depth,
-        ).await?;
+        )
+        .await?;
 
         // Store active memory and auto-snapshot it
         self.active_memories
             .write()
             .await
-            .insert(result.tet_id.clone(), snapshot_payload.clone());
+            .insert(result.tet_id.clone(), (snapshot_payload.clone(), req.manifest.clone().unwrap_or_else(|| crate::models::manifest::AgentManifest {
+                metadata: crate::models::manifest::Metadata {
+                    name: req.alias.clone().unwrap_or_default(),
+                    version: "0.0.0".to_string(),
+                    author_pubkey: Some("UNKNOWN".to_string()),
+                },
+                constraints: crate::models::manifest::ResourceConstraints {
+                    max_memory_pages: 1024,
+                    fuel_limit: 1_000_000,
+                },
+                permissions: crate::models::manifest::CapabilityPolicy {
+                    can_egress: vec![],
+                    can_persist: false,
+                    can_teleport: false,
+                },
+            })));
 
         let snapshot_id = uuid::Uuid::new_v4().to_string();
-        self.snapshots.write().await.insert(snapshot_id.clone(), snapshot_payload);
+        self.snapshots
+            .write()
+            .await
+            .insert(snapshot_id.clone(), snapshot_payload);
 
         // Update the registry to point the alias to the snapshot (hibernation)
         if let Some(alias) = &req.alias {
@@ -937,18 +1069,19 @@ impl TetSandbox for WasmtimeSandbox {
 
     async fn snapshot(&self, id_or_alias: &str) -> Result<String, TetError> {
         let active = self.active_memories.read().await;
-        
+
         // 1. First try direct look-up
-        let mut payload_opt = active.get(id_or_alias).cloned();
-        
+        let mut tuple_opt = active.get(id_or_alias).cloned();
+
         // 2. If not found, try resolving via TetMesh Registry
-        if payload_opt.is_none() {
+        if tuple_opt.is_none() {
             if let Some(target_meta) = self.mesh.resolve(id_or_alias).await {
-                payload_opt = active.get(&target_meta.tet_id).cloned();
+                tuple_opt = active.get(&target_meta.tet_id).cloned();
             }
         }
-        
-        let payload = payload_opt.ok_or_else(|| TetError::SnapshotNotFound(id_or_alias.to_string()))?;
+
+        let (payload, _) =
+            tuple_opt.ok_or_else(|| TetError::SnapshotNotFound(id_or_alias.to_string()))?;
         drop(active);
 
         let snapshot_id = uuid::Uuid::new_v4().to_string();
@@ -958,6 +1091,18 @@ impl TetSandbox for WasmtimeSandbox {
             .insert(snapshot_id.clone(), payload);
 
         Ok(snapshot_id)
+    }
+
+    async fn export_manifest(&self, id_or_alias: &str) -> Result<crate::models::manifest::AgentManifest, TetError> {
+        let active = self.active_memories.read().await;
+        let mut tuple_opt = active.get(id_or_alias).cloned();
+        if tuple_opt.is_none() {
+            if let Some(target_meta) = self.mesh.resolve(id_or_alias).await {
+                tuple_opt = active.get(&target_meta.tet_id).cloned();
+            }
+        }
+        let (_, manifest) = tuple_opt.ok_or_else(|| TetError::SnapshotNotFound(id_or_alias.to_string()))?;
+        Ok(manifest)
     }
 
     async fn export_snapshot(&self, snapshot_id: &str) -> Result<SnapshotPayload, TetError> {
@@ -971,37 +1116,53 @@ impl TetSandbox for WasmtimeSandbox {
 
     async fn import_snapshot(&self, payload: SnapshotPayload) -> Result<String, TetError> {
         let snapshot_id = uuid::Uuid::new_v4().to_string();
-        self.snapshots.write().await.insert(snapshot_id.clone(), payload);
+        self.snapshots
+            .write()
+            .await
+            .insert(snapshot_id.clone(), payload);
         Ok(snapshot_id)
     }
 
-    async fn query_memory(&self, alias: &str, query: crate::memory::SearchQuery) -> Result<Vec<crate::memory::SearchResult>, TetError> {
+    async fn query_memory(
+        &self,
+        alias: &str,
+        query: crate::memory::SearchQuery,
+    ) -> Result<Vec<crate::memory::SearchResult>, TetError> {
         let active = self.active_memories.read().await;
-        
+
         let mut payload_opt = active.get(alias).cloned();
-        
+
         if payload_opt.is_none() {
             if let Some(target_meta) = self.mesh.resolve(alias).await {
                 payload_opt = active.get(&target_meta.tet_id).cloned();
             }
         }
-        
-        let payload = payload_opt.ok_or_else(|| TetError::SnapshotNotFound(alias.to_string()))?;
+
+        let (payload, _) = payload_opt.ok_or_else(|| TetError::SnapshotNotFound(alias.to_string()))?;
         drop(active);
-        
+
         if payload.vector_idx.is_empty() {
             return Ok(Vec::new());
         }
 
         let vector_vfs: crate::memory::VectorVfs = bincode::deserialize(&payload.vector_idx)
-            .map_err(|e| TetError::EngineError(format!("Failed to deserialize VectorVfs: {}", e)))?;
-            
+            .map_err(|e| {
+                TetError::EngineError(format!("Failed to deserialize VectorVfs: {}", e))
+            })?;
+
         vector_vfs.rebuild_all_indexes();
         Ok(vector_vfs.recall(&query))
     }
 
-    async fn infer(&self, _alias: &str, request: crate::inference::InferenceRequest, fuel_limit: u64) -> Result<crate::inference::InferenceResponse, TetError> {
-        self.neural_engine.predict(&request, fuel_limit).await
+    async fn infer(
+        &self,
+        _alias: &str,
+        request: crate::inference::InferenceRequest,
+        fuel_limit: u64,
+    ) -> Result<crate::inference::InferenceResponse, TetError> {
+        self.neural_engine
+            .predict(&request, fuel_limit)
+            .await
             .map_err(TetError::InferenceError)
     }
 
@@ -1022,8 +1183,18 @@ impl TetSandbox for WasmtimeSandbox {
         &self,
         req: crate::models::MeshCallRequest,
     ) -> Result<crate::models::MeshCallResponse, TetError> {
-        self.mesh.send_call(req).await
-            .map_err(|e| TetError::EngineError(format!("Mesh Invocation Failed: {}", e)))
+        self.mesh
+            .send_call(req)
+            .await
+            .map_err(|e| TetError::MeshError(e.to_string()))
+    }
+
+    async fn resolve_local(&self, alias: &str) -> Option<crate::models::TetMetadata> {
+        self.mesh.resolve_local(alias).await
+    }
+
+    async fn deregister(&self, alias: &str) {
+        self.mesh.deregister(alias).await;
     }
 }
 
@@ -1034,7 +1205,11 @@ impl TetSandbox for WasmtimeSandbox {
 fn classify_trap(error: &wasmtime::Error) -> ExecutionStatus {
     let message = format!("{error:#}");
 
-    if message.contains("out of fuel") || message.contains("fuel consumed") || message.contains("epoch") || message.contains("interrupt") {
+    if message.contains("out of fuel")
+        || message.contains("fuel consumed")
+        || message.contains("epoch")
+        || message.contains("interrupt")
+    {
         return ExecutionStatus::OutOfFuel;
     }
 
@@ -1042,7 +1217,9 @@ fn classify_trap(error: &wasmtime::Error) -> ExecutionStatus {
         return ExecutionStatus::MemoryExceeded;
     }
 
-    if message.contains("proc_exit") && (message.contains("exit status 0") || message.contains("with code 0")) {
+    if message.contains("proc_exit")
+        && (message.contains("exit status 0") || message.contains("with code 0"))
+    {
         return ExecutionStatus::Success;
     }
 

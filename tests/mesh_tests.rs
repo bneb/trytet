@@ -9,7 +9,15 @@ use tet_core::sandbox::WasmtimeSandbox;
 fn setup_mesh_sandbox() -> Arc<WasmtimeSandbox> {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers);
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).unwrap());
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            mesh,
+            std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())),
+            false,
+            "test".to_string(),
+        )
+        .unwrap(),
+    );
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
     sandbox
 }
@@ -27,7 +35,7 @@ async fn test_inter_tet_communication() {
     let caller_bytes = std::fs::read("tests/fixtures/mesh_caller.wasm")
         .expect("Mock caller WASM not found. Did you run the rustc helper?");
 
-    // 1. Stage the Receiver. The engine executes it once, it finishes cleanly, 
+    // 1. Stage the Receiver. The engine executes it once, it finishes cleanly,
     // and is automatically snapshotted into "Hibernation" state under the alias.
     let receiver_req = TetExecutionRequest {
         payload: Some(receiver_bytes),
@@ -66,11 +74,14 @@ async fn test_inter_tet_communication() {
     // 3. Assertions
     println!("CALLER STDOUT: {:#?}", caller_result.telemetry.stdout_lines);
     println!("CALLER STDERR: {:#?}", caller_result.telemetry.stderr_lines);
-    
+
     assert_eq!(caller_result.status, ExecutionStatus::Success);
 
     // Verify the caller successfully received and decoded the payload from the mesh!
-    assert!(caller_result.telemetry.stdout_lines.contains(&"CALLER_RECEIVED: SecretData-ECHO".to_string()));
+    assert!(caller_result
+        .telemetry
+        .stdout_lines
+        .contains(&"CALLER_RECEIVED: SecretData-ECHO".to_string()));
 
     // Verify economy fuel deduplication
     // The Caller was allocated 20m fuel. It ran its own WASM code + charged 5m to the Receiver.

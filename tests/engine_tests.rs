@@ -13,7 +13,15 @@ use tet_core::sandbox::WasmtimeSandbox;
 fn setup_sandbox() -> Arc<WasmtimeSandbox> {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers);
-    let sandbox = Arc::new(WasmtimeSandbox::new(mesh, std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())), false, "test".to_string()).unwrap());
+    let sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            mesh,
+            std::sync::Arc::new(tet_core::economy::VoucherManager::new("test".to_string())),
+            false,
+            "test".to_string(),
+        )
+        .unwrap(),
+    );
     tet_core::mesh_worker::spawn_mesh_worker(sandbox.clone(), call_rx);
     sandbox
 }
@@ -449,13 +457,15 @@ async fn test_concurrent_executions() {
         let sandbox = sandbox.clone();
         handles.push(tokio::spawn(async move {
             let req = TetExecutionRequest {
-                payload: Some(wat::parse_str(
-                    r#"(module
+                payload: Some(
+                    wat::parse_str(
+                        r#"(module
                     (memory (export "memory") 1)
                     (func (export "_start"))
                 )"#,
-                )
-                .unwrap()),
+                    )
+                    .unwrap(),
+                ),
                 env: HashMap::new(),
                 injected_files: HashMap::new(),
                 allocated_fuel: 10_000_000,
@@ -463,8 +473,8 @@ async fn test_concurrent_executions() {
                 parent_snapshot_id: None,
                 alias: None,
                 call_depth: 0,
-        voucher: None,
-        egress_policy: None,
+                voucher: None,
+                egress_policy: None,
             };
             sandbox.execute(req).await.unwrap()
         }));

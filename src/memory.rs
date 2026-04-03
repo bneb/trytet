@@ -135,17 +135,22 @@ impl VectorVfs {
         for _ in 0..NUM_SHARDS {
             shards.push(Arc::new(VectorShard::default()));
         }
-        let mut vfs = Self { shards, compaction_tx: None };
+        let mut vfs = Self {
+            shards,
+            compaction_tx: None,
+        };
         vfs.start_background_worker();
         vfs
     }
 
     pub fn start_background_worker(&mut self) {
-        if self.compaction_tx.is_some() { return; }
+        if self.compaction_tx.is_some() {
+            return;
+        }
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         self.compaction_tx = Some(tx);
         let shards_clone = self.shards.clone();
-        
+
         tokio::spawn(async move {
             while let Some(collection) = rx.recv().await {
                 let mut hasher = AHasher::default();
@@ -158,7 +163,9 @@ impl VectorVfs {
                 };
                 tokio::task::spawn_blocking(move || {
                     Self::do_compaction(&col);
-                }).await.unwrap();
+                })
+                .await
+                .unwrap();
             }
         });
     }
@@ -175,11 +182,13 @@ impl VectorVfs {
         let res = shard
             .collections
             .entry(collection.to_string())
-            .or_insert_with(|| Arc::new(VectorCollection {
-                tier1: Tier1Data::default(),
-                tier2: Arc::new(std::sync::RwLock::new(Arc::new(Tier2Data::default()))),
-                is_compacting: Arc::new(AtomicBool::new(false)),
-            }))
+            .or_insert_with(|| {
+                Arc::new(VectorCollection {
+                    tier1: Tier1Data::default(),
+                    tier2: Arc::new(std::sync::RwLock::new(Arc::new(Tier2Data::default()))),
+                    is_compacting: Arc::new(AtomicBool::new(false)),
+                })
+            })
             .value()
             .clone();
         res
@@ -188,12 +197,12 @@ impl VectorVfs {
     /// Appends the vector into memory via a Tier 1 O(1) buffer.
     pub fn remember(&self, collection: &str, record: VectorRecord) {
         let col = self.get_collection(collection);
-        
+
         // Enforce 2048 hard cap to prevent unbounded Memory Bombs
         if col.tier1.records.len() >= 2048 {
             self.compact_collection(collection);
         }
-        
+
         col.tier1.records.insert(record.id.clone(), record);
     }
 
@@ -305,7 +314,11 @@ impl VectorVfs {
 
     pub fn rebuild_all_indexes(&self) {
         for shard in &self.shards {
-            let cols: Vec<String> = shard.collections.iter().map(|col| col.key().clone()).collect();
+            let cols: Vec<String> = shard
+                .collections
+                .iter()
+                .map(|col| col.key().clone())
+                .collect();
             for col in cols {
                 self.compact_collection(&col);
             }

@@ -1,3 +1,8 @@
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -5,12 +10,11 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Row, Table},
     Terminal,
 };
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+use std::{
+    error::Error,
+    io,
+    time::{Duration, Instant},
 };
-use std::{error::Error, io, time::{Duration, Instant}};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Setup terminal
@@ -70,31 +74,59 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), 
                 Row::new(vec!["librarian_1", "Booting", "0ms", "0MB", "0"]),
                 Row::new(vec!["analyst_1", "Running", "8ms", "12MB", "0"]),
             ];
-            
-            let heartbeat_table = Table::new(heartbeats, [
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-            ])
-            .header(Row::new(vec!["Agent", "Status", "Latency", "Memory", "Vector Pressure"]))
-            .block(Block::default().borders(Borders::ALL).title("Swarm Heartbeat"));
+
+            let heartbeat_table = Table::new(
+                heartbeats,
+                [
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(20),
+                ],
+            )
+            .header(Row::new(vec![
+                "Agent",
+                "Status",
+                "Latency",
+                "Memory",
+                "Vector Pressure",
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Swarm Heartbeat"),
+            );
 
             f.render_widget(heartbeat_table, chunks[1]);
-            
+
             let mesh_events = vec![
-                Row::new(vec!["12:00:01", "researcher_1 -> librarian_1", "Query HNSW Segment"]),
-                Row::new(vec!["12:00:02", "librarian_1 -> memory", "Recall k=5 (0.5ms)"]),
+                Row::new(vec![
+                    "12:00:01",
+                    "researcher_1 -> librarian_1",
+                    "Query HNSW Segment",
+                ]),
+                Row::new(vec![
+                    "12:00:02",
+                    "librarian_1 -> memory",
+                    "Recall k=5 (0.5ms)",
+                ]),
             ];
 
-            let mesh_map = Table::new(mesh_events, [
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
-                Constraint::Percentage(40),
-            ])
+            let mesh_map = Table::new(
+                mesh_events,
+                [
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(40),
+                    Constraint::Percentage(40),
+                ],
+            )
             .header(Row::new(vec!["Timestamp", "Edge", "Payload"]))
-            .block(Block::default().borders(Borders::ALL).title("Mesh Telemetry Stream"));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Mesh Telemetry Stream"),
+            );
 
             f.render_widget(mesh_map, chunks[2]);
         })?;
@@ -102,7 +134,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
-            
+
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if let KeyCode::Char('q') = key.code {

@@ -59,6 +59,9 @@ export function Navbar() {
           <Link href="/how-to" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
             How To
           </Link>
+          <Link href="/architecture" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
+            Architecture
+          </Link>
           <Link href="/web-demo" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
             Live Demo
           </Link>

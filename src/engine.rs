@@ -40,16 +40,37 @@ pub trait TetSandbox: Send + Sync {
     async fn snapshot(&self, tet_id: &str) -> Result<String, TetError>;
 
     /// Export a snapshot payload from the engine's memory.
-    async fn export_snapshot(&self, snapshot_id: &str) -> Result<crate::sandbox::SnapshotPayload, TetError>;
+    async fn export_snapshot(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<crate::sandbox::SnapshotPayload, TetError>;
+
+    /// Phase 14: Export the manifest of an active or hibernating agent.
+    async fn export_manifest(
+        &self,
+        id_or_alias: &str,
+    ) -> Result<crate::models::manifest::AgentManifest, TetError>;
 
     /// Import a snapshot payload directly into the engine's memory, returning the snapshot ID.
-    async fn import_snapshot(&self, payload: crate::sandbox::SnapshotPayload) -> Result<String, TetError>;
+    async fn import_snapshot(
+        &self,
+        payload: crate::sandbox::SnapshotPayload,
+    ) -> Result<String, TetError>;
 
     /// Phase 9: Query the active Vector-VFS semantic memory of a running/hibernating Tet.
-    async fn query_memory(&self, alias: &str, query: crate::memory::SearchQuery) -> Result<Vec<crate::memory::SearchResult>, TetError>;
+    async fn query_memory(
+        &self,
+        alias: &str,
+        query: crate::memory::SearchQuery,
+    ) -> Result<Vec<crate::memory::SearchResult>, TetError>;
 
     /// Phase 10: Perform neural inference on a Tet's loaded model.
-    async fn infer(&self, alias: &str, request: crate::inference::InferenceRequest, fuel_limit: u64) -> Result<crate::inference::InferenceResponse, TetError>;
+    async fn infer(
+        &self,
+        alias: &str,
+        request: crate::inference::InferenceRequest,
+        fuel_limit: u64,
+    ) -> Result<crate::inference::InferenceResponse, TetError>;
 
     /// Forks a previously snapshotted environment into a new, independent Tet instance.
     ///
@@ -75,6 +96,12 @@ pub trait TetSandbox: Send + Sync {
         &self,
         req: crate::models::MeshCallRequest,
     ) -> Result<crate::models::MeshCallResponse, TetError>;
+
+    /// Phase 14: Mesh discovery.
+    async fn resolve_local(&self, alias: &str) -> Option<crate::models::TetMetadata>;
+
+    /// Phase 14: Mesh cleanup.
+    async fn deregister(&self, alias: &str);
 }
 
 /// Errors that can occur at the engine infrastructure level.
@@ -121,7 +148,7 @@ impl TetError {
             TetError::SnapshotNotFound(_) => 404,
             TetError::SecurityViolation(_) => 403,
             TetError::VfsError(_) => 500,
-            TetError::MeshError(_) => 502, // Bad Gateway pattern
+            TetError::MeshError(_) => 502,       // Bad Gateway pattern
             TetError::CallStackExhausted => 429, // Too many requests/depth
             TetError::InferenceError(_) => 500,
         }

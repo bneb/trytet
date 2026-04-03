@@ -1,12 +1,12 @@
 //! Tet-Mesh Registry and RPC Router
-//! 
+//!
 //! Manages zero-trust discovery between Tets using arbitrary aliases
 //! and routes `MeshCallRequest`s securely without relying on OS networking.
 
 use crate::models::{MeshCallRequest, MeshCallResponse, TetMetadata, TopologyEdge};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 /// A message routed across the Tet-Mesh.
@@ -33,7 +33,10 @@ pub struct TetMesh {
 
 impl TetMesh {
     /// Creates a new TetMesh and returns its Receiver for the Engine to poll.
-    pub fn new(capacity: usize, hive_peers: crate::hive::HivePeers) -> (Self, mpsc::Receiver<MeshMessage>) {
+    pub fn new(
+        capacity: usize,
+        hive_peers: crate::hive::HivePeers,
+    ) -> (Self, mpsc::Receiver<MeshMessage>) {
         let (tx, rx) = mpsc::channel(capacity);
         (
             Self {
@@ -47,7 +50,14 @@ impl TetMesh {
     }
 
     /// Records a new metric data point inside the Live Swarm Topology Edge.
-    pub async fn record_telemetry(&self, source: String, target: String, bytes: u64, latency_us: u64, is_error: bool) {
+    pub async fn record_telemetry(
+        &self,
+        source: String,
+        target: String,
+        bytes: u64,
+        latency_us: u64,
+        is_error: bool,
+    ) {
         let key = format!("{}->{}", source, target);
         let mut edges = self.topology.write().await;
         let edge = edges.entry(key).or_insert(TopologyEdge {
@@ -66,7 +76,10 @@ impl TetMesh {
         }
         edge.total_latency_us += latency_us;
         edge.total_bytes += bytes;
-        edge.last_seen_ns = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+        edge.last_seen_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
     }
 
     /// Returns a flat vector of all native edges currently witnessed on the Mesh.
@@ -75,11 +88,11 @@ impl TetMesh {
     }
 
     /// Registers a new alias pointing to a Tet.
-    pub async fn register(&self, alias: String, metadata: TetMetadata) {
+    pub async fn register(&self, alias: String, metadata: crate::models::TetMetadata) {
         self.registry.write().await.insert(alias, metadata);
     }
 
-    pub async fn resolve_local(&self, alias: &str) -> Option<TetMetadata> {
+    pub async fn resolve_local(&self, alias: &str) -> Option<crate::models::TetMetadata> {
         self.registry.read().await.get(alias).cloned()
     }
 
@@ -93,8 +106,8 @@ impl TetMesh {
         let nodes = self.hive_peers.list_peers().await;
         for target_node in nodes {
             let cmd = crate::hive::HiveCommand::ResolveAlias(alias.to_string());
-            if let Ok(crate::hive::HiveCommand::ResolveAliasResponse(Some(meta))) = 
-                crate::hive::HiveClient::rpc_call(&target_node.public_addr, cmd).await 
+            if let Ok(crate::hive::HiveCommand::ResolveAliasResponse(Some(meta))) =
+                crate::hive::HiveClient::rpc_call(&target_node.public_addr, cmd).await
             {
                 // We found it remotely! Note: It contains a remote node boundary in the future
                 // For now, returning TetMetadata tells the engine it exists.
@@ -112,12 +125,15 @@ impl TetMesh {
     /// Sends a remote procedure call across the internal channel.
     pub async fn send_call(&self, req: MeshCallRequest) -> Result<MeshCallResponse, &'static str> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let msg = MeshMessage::Call { req, reply: reply_tx };
-        
+        let msg = MeshMessage::Call {
+            req,
+            reply: reply_tx,
+        };
+
         if self.tx.send(msg).await.is_err() {
             return Err("Mesh channel closed");
         }
-        
+
         reply_rx.await.map_err(|_| "Mesh call dropped")
     }
 }
