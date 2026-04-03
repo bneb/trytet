@@ -69,7 +69,7 @@ async fn test_teleport_atomic_handoff() {
     let target_node_id = "target-node".to_string();
     let target_voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(target_node_id.clone()));
     let target_sandbox = Arc::new(WasmtimeSandbox::new(target_mesh, target_voucher_manager, false, target_node_id).unwrap());
-    let target_server = HiveServer::new(target_peers);
+    let target_server = HiveServer::new(target_peers, None, None);
     
     // Find free port
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

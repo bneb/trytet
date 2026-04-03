@@ -40,7 +40,13 @@ async fn main() -> anyhow::Result<()> {
     let hive_peers = tet_core::hive::HivePeers::new();
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers.clone());
 
-    let hive_server = tet_core::hive::HiveServer::new(hive_peers.clone());
+    let registry_client = if let Ok(url) = std::env::var("REGISTRY_URL") {
+        Some(Arc::new(tet_core::registry::oci::OciClient::new(url, std::env::var("REGISTRY_TOKEN").ok())))
+    } else {
+        None
+    };
+
+    let hive_server = tet_core::hive::HiveServer::new(hive_peers.clone(), registry_client.clone(), None);
     let mesh_clone = mesh.clone();
 
     let local_node_id = uuid::Uuid::new_v4().to_string(); // In a real node, load from config
@@ -73,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         sandbox: sandbox.clone(),
         registry,
-        registry_client: None, // Default to None for now
+        registry_client, // Provided by environment
         hive: Some(hive_peers),
         ingress_routes: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     });

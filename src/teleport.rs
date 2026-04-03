@@ -59,9 +59,16 @@ impl TeleportRequest {
         let mut bytes_transferred = 0;
 
         if self.use_registry {
-            let _registry = registry_client.ok_or_else(|| TeleportError::Network(anyhow::anyhow!("Registry client not configured")))?;
-            // Option B: Registry logic
-            return Err(TeleportError::Network(anyhow!("Registry-based teleport not yet fully implemented")));
+            let registry = registry_client.ok_or_else(|| TeleportError::Network(anyhow::anyhow!("Registry client not configured")))?;
+            let reference = format!("{}-state:temp", self.agent_id);
+            
+            registry.push_state(&payload, &reference).await.map_err(|e| TeleportError::Network(anyhow::anyhow!("Registry push failed: {}", e)))?;
+            
+            HiveClient::send_command(&self.target_address, HiveCommand::MigrationNotice { 
+                reference,
+                manifest: manifest.clone(),
+                snapshot_id: snapshot_id.clone()
+            }).await.map_err(|e| TeleportError::TargetError(e.to_string()))?;
         } else {
             // Option A: Direct P2P Streaming
             HiveClient::send_command(&self.target_address, HiveCommand::MigrationPacket(MigrationPacket::Handshake {

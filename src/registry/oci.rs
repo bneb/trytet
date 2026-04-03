@@ -7,8 +7,9 @@ pub const MEDIA_TYPE_MANIFEST: &str = "application/vnd.trytet.manifest.v1+json";
 pub const MEDIA_TYPE_CONFIG: &str = "application/vnd.trytet.config.v1+json";
 pub const MEDIA_TYPE_LAYER_WASM: &str = "application/vnd.trytet.layer.v1.wasm";
 pub const MEDIA_TYPE_LAYER_VFS: &str = "application/vnd.trytet.layer.v1.tar+zstd";
-
 pub const MEDIA_TYPE_LAYER_SIGNATURE: &str = "application/vnd.trytet.layer.v1.signature";
+pub const MEDIA_TYPE_LAYER_STATE: &str = "application/vnd.trytet.layer.v1.state";
+pub const MEDIA_TYPE_STATE_MANIFEST: &str = "application/vnd.trytet.state.manifest.v1+json";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OciManifest {
@@ -222,6 +223,83 @@ impl OciClient {
         };
 
         Ok(artifact)
+    }
+
+    pub async fn push_state(&self, payload: &crate::sandbox::SnapshotPayload, reference: &str) -> Result<String> {
+        let (name, tag) = reference.split_once(':').unwrap_or((reference, "latest"));
+        
+        let state_bytes = bincode::serialize(payload)?;
+        let state_digest = format!("sha256:{}", hex::encode(Sha256::digest(&state_bytes)));
+        
+        // Use an empty JSON dict for config as placeholder for state manifest
+        let config_json = b"{}".to_vec();
+        let config_digest = format!("sha256:{}", hex::encode(Sha256::digest(&config_json)));
+
+        self.upload_blob(name, &state_digest, &state_bytes).await?;
+        self.upload_blob(name, &config_digest, &config_json).await?;
+
+        let manifest = OciManifest {
+            schema_version: 2,
+            media_type: MEDIA_TYPE_STATE_MANIFEST.to_string(),
+            config: OciDescriptor {
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                digest: config_digest.clone(),
+                size: config_json.len(),
+            },
+            layers: vec![
+                OciDescriptor {
+                    media_type: MEDIA_TYPE_LAYER_STATE.to_string(),
+                    digest: state_digest.clone(),
+                    size: state_bytes.len(),
+                },
+            ],
+        };
+
+        let manifest_json = serde_json::to_vec(&manifest)?;
+        let url = format!("{}/v2/{}/manifests/{}", self.registry_url, name, tag);
+        
+        let mut req = self.http.put(&url)
+            .header("Content-Type", MEDIA_TYPE_STATE_MANIFEST)
+            .body(manifest_json.clone());
+            
+        if let Some(auth) = self.get_auth_header() {
+            req = req.header("Authorization", auth);
+        }
+
+        let res = req.send().await?;
+        if !res.status().is_success() {
+            return Err(anyhow!("Failed to push state manifest: {} - {}", res.status(), res.text().await?));
+        }
+
+        let manifest_digest = format!("sha256:{}", hex::encode(Sha256::digest(&manifest_json)));
+        Ok(manifest_digest)
+    }
+
+    pub async fn pull_state(&self, reference: &str) -> Result<crate::sandbox::SnapshotPayload> {
+        let (name, tag) = reference.split_once(':').unwrap_or((reference, "latest"));
+        
+        let url = format!("{}/v2/{}/manifests/{}", self.registry_url, name, tag);
+        let mut req = self.http.get(&url)
+            .header("Accept", MEDIA_TYPE_STATE_MANIFEST);
+            
+        if let Some(auth) = self.get_auth_header() {
+            req = req.header("Authorization", auth);
+        }
+
+        let res = req.send().await?;
+        if !res.status().is_success() {
+            return Err(anyhow!("Failed to pull state manifest: {} - {}", res.status(), res.text().await?));
+        }
+        
+        let manifest: OciManifest = res.json().await?;
+
+        let state_desc = manifest.layers.iter().find(|l| l.media_type == MEDIA_TYPE_LAYER_STATE)
+            .ok_or_else(|| anyhow!("Missing State layer"))?;
+
+        let state_bytes = self.fetch_blob(name, &state_desc.digest).await?;
+        
+        let payload: crate::sandbox::SnapshotPayload = bincode::deserialize(&state_bytes)?;
+        Ok(payload)
     }
 
     async fn fetch_blob(&self, name: &str, digest: &str) -> Result<Vec<u8>> {

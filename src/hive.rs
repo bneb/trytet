@@ -31,6 +31,7 @@ pub struct TeleportationEnvelope {
 }
 
 pub mod link;
+pub mod security;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HiveCommand {
@@ -40,6 +41,11 @@ pub enum HiveCommand {
     ResolveAliasResponse(Option<crate::models::TetMetadata>),
     MigrateRequest(Box<TeleportationEnvelope>),
     MigrationPacket(link::MigrationPacket),
+    MigrationNotice {
+        reference: String,
+        manifest: crate::models::manifest::AgentManifest,
+        snapshot_id: String,
+    },
 }
 
 /// The local registry of known Hive peers.
@@ -92,13 +98,17 @@ impl MigrationManager {
 pub struct HiveServer {
     peers: HivePeers,
     migration_manager: Arc<MigrationManager>,
+    registry_client: Option<Arc<crate::registry::oci::OciClient>>,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
 }
 
 impl HiveServer {
-    pub fn new(peers: HivePeers) -> Self {
+    pub fn new(peers: HivePeers, registry_client: Option<Arc<crate::registry::oci::OciClient>>, tls_acceptor: Option<tokio_rustls::TlsAcceptor>) -> Self {
         Self { 
             peers, 
-            migration_manager: Arc::new(MigrationManager::new())
+            migration_manager: Arc::new(MigrationManager::new()),
+            registry_client,
+            tls_acceptor,
         }
     }
 
@@ -114,6 +124,8 @@ impl HiveServer {
         let peers = self.peers.clone();
         let migration_manager = self.migration_manager.clone();
 
+        let tls_acceptor = self.tls_acceptor.clone();
+
         tokio::spawn(async move {
             loop {
                 if let Ok((mut socket, _addr)) = listener.accept().await {
@@ -121,9 +133,25 @@ impl HiveServer {
                     let m = mesh.clone();
                     let s = sandbox.clone();
                     let mm = migration_manager.clone();
+                    let rc = self.registry_client.clone();
+                    let acceptor_clone = tls_acceptor.clone();
+
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_connection(&mut socket, p, m, s, mm).await {
-                            error!("Hive connection error: {}", e);
+                        if let Some(acceptor) = acceptor_clone {
+                            match acceptor.accept(socket).await {
+                                Ok(mut tls_stream) => {
+                                    if let Err(e) = Self::handle_connection(&mut tls_stream, p, m, s, mm, rc).await {
+                                        error!("Hive TLS connection error: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("TLS handshake failed: {}", e);
+                                }
+                            }
+                        } else {
+                            if let Err(e) = Self::handle_connection(&mut socket, p, m, s, mm, rc).await {
+                                error!("Hive connection error: {}", e);
+                            }
                         }
                     });
                 }
@@ -133,12 +161,13 @@ impl HiveServer {
         Ok(())
     }
 
-    async fn handle_connection(
-        socket: &mut TcpStream,
+    async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+        socket: &mut S,
         peers: HivePeers,
         mesh: crate::mesh::TetMesh,
         sandbox: Arc<crate::sandbox::WasmtimeSandbox>,
         migration_manager: Arc<MigrationManager>,
+        registry_client: Option<Arc<crate::registry::oci::OciClient>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Read 4-byte length prefix
         let mut len_buf = [0u8; 4];
@@ -226,6 +255,49 @@ impl HiveServer {
                 Self::handle_migration_packet(packet, sandbox, migration_manager).await?;
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
+            HiveCommand::MigrationNotice { reference, manifest, snapshot_id: _ } => {
+                info!("Received Registry Migration Notice for agent: {}", manifest.metadata.name);
+                let registry = registry_client.ok_or_else(|| anyhow::anyhow!("Registry client not configured to perform mediated handoff"))?;
+                
+                match registry.pull_state(&reference).await {
+                    Ok(payload) => {
+                        use crate::engine::TetSandbox;
+                        match sandbox.import_snapshot(payload).await {
+                            Ok(snap_id) => {
+                                let alias = manifest.metadata.name.clone();
+                                let sandbox_clone = sandbox.clone();
+                                let manifest_name = manifest.metadata.name.clone();
+                                tokio::spawn(async move {
+                                    let req = crate::models::TetExecutionRequest {
+                                        alias: Some(alias),
+                                        payload: None,
+                                        parent_snapshot_id: Some(snap_id.clone()),
+                                        allocated_fuel: 50_000_000,
+                                        max_memory_mb: 64,
+                                        env: std::collections::HashMap::new(),
+                                        injected_files: std::collections::HashMap::new(),
+                                        call_depth: 0,
+                                        voucher: None,
+                                        manifest: Some(manifest),
+                                        egress_policy: None,
+                                    };
+                                    let _ = sandbox_clone.fork(&snap_id, req).await;
+                                });
+                                info!("Agent {} successfully pulled and resurrected from registry", manifest_name);
+                                socket.write_all(&0u32.to_be_bytes()).await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to import registry payload: {:?}", e);
+                                return Err(e.into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to pull registry payload: {:?}", e);
+                        return Err(e.into());
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -296,13 +368,38 @@ impl HiveClient {
         target_addr: &str,
         command: HiveCommand,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        Self::send_command_tls(target_addr, command, None, None).await
+    }
+
+    pub async fn send_command_tls(
+        target_addr: &str,
+        command: HiveCommand,
+        tls_connector: Option<tokio_rustls::TlsConnector>,
+        domain: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut socket = TcpStream::connect(target_addr).await?;
-
-        let payload = bincode::serialize(&command)?;
+        
+        let mut payload = bincode::options()
+            .with_limit(MAX_SNAPSHOT_SIZE)
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .serialize(&command)?;
+        
         let len = payload.len() as u32;
+        let mut full_payload = len.to_be_bytes().to_vec();
+        full_payload.append(&mut payload);
 
-        socket.write_all(&len.to_be_bytes()).await?;
-        socket.write_all(&payload).await?;
+        if let Some(connector) = tls_connector {
+            let server_name = rustls::pki_types::ServerName::try_from(domain.unwrap_or("localhost"))?.to_owned();
+            let mut tls_stream = connector.connect(server_name, socket).await?;
+            tls_stream.write_all(&full_payload).await?;
+            let mut ack = [0u8; 4];
+            tls_stream.read_exact(&mut ack).await?;
+        } else {
+            socket.write_all(&full_payload).await?;
+            let mut ack = [0u8; 4];
+            socket.read_exact(&mut ack).await?;
+        }
 
         Ok(())
     }
