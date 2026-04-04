@@ -12,7 +12,7 @@ export default function ArchitecturePage() {
                 <header className="pt-24 pb-16 px-10 w-full max-w-[1000px]">
                     <h1 className="text-[clamp(40px,8vw,72px)] font-bold tracking-tight mb-6 leading-[1.1]">
                         The Single-Page Universe <br/>
-                        <span className="text-transparent bg-clip-text bg-gradient-to-br from-[var(--text-main)] from-70% to-[rgba(175,82,222,0.6)]">64KB Sovereignty.</span>
+                        <span className="text-transparent bg-clip-text bg-gradient-to-br from-[var(--text-main)] from-70% to-[rgba(175,82,222,0.6)]">A 64KB Footprint.</span>
                     </h1>
                     <p className="text-[20px] text-[var(--text-sub)] max-w-[700px] mb-10">
                         To understand how an agent can shrink to 64KB, we have to stop thinking like "Cloud Engineers" (who think in Gigabytes) and start thinking like "Systems Architects" (who think in Pages).
@@ -48,7 +48,7 @@ export default function ArchitecturePage() {
                                 2. "The Soul vs. The Library"
                             </div>
                             <p className="text-lg text-[var(--text-sub)] leading-relaxed mb-8">
-                                The biggest misconception is that the LLM (the model) is inside the 64KB. It isn't. In a Sovereign architecture, we separate the <strong className="text-[var(--text-main)]">Logic</strong> from the <strong className="text-[var(--text-main)]">Weights</strong>:
+                                The biggest misconception is that the LLM (the model) is inside the 64KB. It isn't. In a stateless micro-architecture, we separate the <strong className="text-[var(--text-main)]">Logic</strong> from the <strong className="text-[var(--text-main)]">Weights</strong>:
                             </p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="p-6 rounded-xl bg-[rgba(var(--accent-blue-rgb),0.05)] border border-[var(--card-border)]">
@@ -113,7 +113,7 @@ export default function ArchitecturePage() {
                                 T<sub>teleport</sub> = Size / Bandwidth
                             </div>
                             <div className="text-xs uppercase tracking-widest text-[var(--text-sub)] mb-10">
-                                The Physics of Sovereign Mobility
+                                The Physics of Native Teleportation
                             </div>
                             
                             <div className="max-w-[800px] space-y-6">
@@ -124,7 +124,7 @@ export default function ArchitecturePage() {
                                     If an agent is <strong className="text-[var(--text-main)]">1GB</strong> (a standard Docker container), it takes <strong className="text-[var(--accent-magenta)]">8,000ms</strong>.
                                 </p>
                                 <p className="text-lg text-[var(--text-sub)] leading-relaxed pt-4 border-t border-[var(--card-border)]">
-                                    By staying small, the agent becomes Instantaneous. It can hop from your phone to a cloud node to a specialized NPU in the time it takes for a single human eyelid to blink. That is the definition of <strong className="text-[var(--text-main)]">Sovereign Mobility</strong>.
+                                    By staying small, the agent becomes Instantaneous. It can hop from your phone to a cloud node to a specialized NPU in the time it takes for a single human eyelid to blink. That is the definition of <strong className="text-[var(--text-main)]">Native Teleportation</strong>.
                                 </p>
                             </div>
                         </section>
