@@ -11,6 +11,8 @@ fn test_hard_ceiling_override() {
 
     let mut session = SwarmSession {
         session_id: "test1".to_string(),
+        model_id: Some("LlamaV5".to_string()),
+        temperature: Some(0.7),
         blocks: vec![
             InputContentBlock::new(BlockType::System, system_content.clone()),
             InputContentBlock::new(BlockType::User, user_content_1),
@@ -53,6 +55,8 @@ fn test_toolresult_truncation() {
 
     let mut session = SwarmSession {
         session_id: "test2".to_string(),
+        model_id: Some("LlamaV5".to_string()),
+        temperature: Some(0.7),
         blocks: vec![
             InputContentBlock::new(BlockType::System, "SYSTEM".to_string()),
             InputContentBlock::new(BlockType::ToolResult, huge_json),

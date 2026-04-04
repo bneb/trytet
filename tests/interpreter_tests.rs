@@ -44,6 +44,8 @@ async fn test_vfs_injection_and_extraction() {
         call_depth: 0,
         voucher: None,
         egress_policy: None,
+        target_function: None,
+        manifest: None,
     };
 
     let result = sandbox.execute(req).await.unwrap();
@@ -95,11 +97,13 @@ async fn test_vfs_injection_and_extraction() {
         call_depth: 0,
         voucher: None,
         egress_policy: None,
+        target_function: None,
+        manifest: None,
     };
 
     let fork_result = sandbox
         .fork(
-            &fork_req.parent_snapshot_id.as_ref().unwrap(),
+            fork_req.parent_snapshot_id.as_ref().unwrap(),
             fork_req.clone(),
         )
         .await

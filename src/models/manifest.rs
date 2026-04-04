@@ -21,6 +21,14 @@ pub struct Metadata {
 pub struct ResourceConstraints {
     pub max_memory_pages: u32, // Wasm pages (64KiB each)
     pub fuel_limit: u64,       // Deterministic instruction count
+    /// Phase 17.1: Maximum egress bytes per execution lifecycle.
+    /// Defaults to 1MB (1_000_000) when not specified.
+    #[serde(default = "default_max_egress_bytes")]
+    pub max_egress_bytes: u64,
+}
+
+fn default_max_egress_bytes() -> u64 {
+    1_000_000
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,6 +36,10 @@ pub struct CapabilityPolicy {
     pub can_egress: Vec<String>,
     pub can_persist: bool,
     pub can_teleport: bool,
+    #[serde(default)]
+    pub is_genesis_factory: bool,
+    #[serde(default)]
+    pub can_fork: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

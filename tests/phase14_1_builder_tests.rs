@@ -1,6 +1,4 @@
-use ed25519_dalek::SigningKey;
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 use tet_core::builder::{BuildError, TetArtifact, TetBuilder};
 use tet_core::models::manifest::{AgentManifest, ManifestError};
@@ -139,7 +137,7 @@ async fn test_signature_integrity() {
     builder.assemble().await.expect("Build failed");
 
     // Manually manipulate the .tet file to flip a bit in WASM layer
-    let mut bad_artifact_bytes = fs::read(&out_path).unwrap();
+    let bad_artifact_bytes = fs::read(&out_path).unwrap();
 
     // We can parse it, manipulate the blueprint_wasm, then re-serialize to properly corrupt the signature
     let mut artifact: TetArtifact = bincode::deserialize(&bad_artifact_bytes).unwrap();

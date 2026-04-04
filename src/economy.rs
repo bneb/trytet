@@ -1,3 +1,6 @@
+pub mod bridge;
+pub mod registry;
+
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

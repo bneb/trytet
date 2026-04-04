@@ -1,20 +1,21 @@
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 use axum::{
-    routing::{get, put, post},
-    Router, Json, extract::{Path, State},
-    http::StatusCode,
     body::Bytes,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post, put},
+    Json, Router,
 };
-use tet_core::registry::oci::{OciClient, OciManifest};
-use tet_core::sandbox::{WasmtimeSandbox};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tet_core::economy::VoucherManager;
 use tet_core::engine::TetSandbox;
 use tet_core::hive::{HivePeers, HiveServer};
 use tet_core::mesh::TetMesh;
-use tet_core::economy::VoucherManager;
 use tet_core::models::TetExecutionRequest;
-use std::collections::HashMap;
+use tet_core::registry::oci::{OciClient, OciManifest};
+use tet_core::sandbox::WasmtimeSandbox;
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 #[derive(Clone, Default)]
 struct MockRegistry {
@@ -28,7 +29,11 @@ async fn handle_post_blob(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     let location = format!("/v2/{}/blobs/uploads/?id=123", name);
-    (StatusCode::ACCEPTED, [(axum::http::header::LOCATION, location)]).into_response()
+    (
+        StatusCode::ACCEPTED,
+        [(axum::http::header::LOCATION, location)],
+    )
+        .into_response()
 }
 
 async fn handle_head_blob(
@@ -73,7 +78,7 @@ async fn handle_get_manifest(
     use axum::response::IntoResponse;
     let reference = format!("{}:{}", name, tag);
     if let Some(manifest) = reg.manifests.lock().await.get(&reference) {
-        Json(manifest.clone()).into_response()
+        Json(manifest).into_response()
     } else {
         StatusCode::NOT_FOUND.into_response()
     }
@@ -94,9 +99,15 @@ async fn handle_get_blob(
 fn create_mock_registry() -> (Router, MockRegistry) {
     let state = MockRegistry::default();
     let app = Router::new()
-        .route("/v2/{name}/blobs/{digest}", get(handle_get_blob).head(handle_head_blob))
+        .route(
+            "/v2/{name}/blobs/{digest}",
+            get(handle_get_blob).head(handle_head_blob),
+        )
         .route("/v2/{name}/blobs/uploads/", post(handle_post_blob))
-        .route("/v2/{name}/manifests/{tag}", get(handle_get_manifest).put(handle_put_manifest))
+        .route(
+            "/v2/{name}/manifests/{tag}",
+            get(handle_get_manifest).put(handle_put_manifest),
+        )
         // Put blob upload fallback using /uploads/
         .route("/v2/{name}/blobs/uploads/", put(handle_put_blob))
         .with_state(state.clone());
@@ -124,31 +135,52 @@ async fn test_mediated_lazarus() {
     // 2. Setup Network
     let hive_peers = HivePeers::new();
     let port = 8999;
-    
+
     // Disable economic guard
     std::env::set_var("TET_DISABLE_ECONOMIC_GUARD", "1");
 
     let (mesh, call_rx) = TetMesh::new(10, hive_peers.clone());
     let voucher_manager = Arc::new(VoucherManager::new("target_node".to_string()));
-    let target_sandbox = Arc::new(WasmtimeSandbox::new(mesh.clone(), voucher_manager, false, "target_node".to_string()).unwrap());
+    let target_sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            mesh.clone(),
+            voucher_manager,
+            false,
+            "target_node".to_string(),
+        )
+        .unwrap(),
+    );
 
     // Start Target Hive Server with OciClient
     let target_server = HiveServer::new(hive_peers.clone(), Some(oci_client.clone()), None);
     let target_sandbox_clone = target_sandbox.clone();
     let target_mesh = mesh.clone();
     tokio::spawn(async move {
-        target_server.start(port, target_mesh, target_sandbox_clone).await.unwrap();
+        target_server
+            .start(port, target_mesh, target_sandbox_clone)
+            .await
+            .unwrap();
     });
     tet_core::mesh_worker::spawn_mesh_worker(target_sandbox.clone(), call_rx);
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // 3. Setup Source Node
     let (source_mesh, _) = TetMesh::new(10, hive_peers.clone());
-    let source_sandbox = Arc::new(WasmtimeSandbox::new(source_mesh.clone(), Arc::new(VoucherManager::new("source".to_string())), false, "source".to_string()).unwrap());
+    let source_sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            source_mesh.clone(),
+            Arc::new(VoucherManager::new("source".to_string())),
+            false,
+            "source".to_string(),
+        )
+        .unwrap(),
+    );
 
     // 4. Create Agent on Source
     let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
-    use tet_core::models::manifest::{AgentManifest, Metadata, ResourceConstraints, CapabilityPolicy};
+    use tet_core::models::manifest::{
+        AgentManifest, CapabilityPolicy, Metadata, ResourceConstraints,
+    };
     let manifest = AgentManifest {
         metadata: Metadata {
             name: "agent-gamma".to_string(),
@@ -158,11 +190,14 @@ async fn test_mediated_lazarus() {
         constraints: ResourceConstraints {
             max_memory_pages: 16,
             fuel_limit: 1000000,
+            max_egress_bytes: 1_000_000,
         },
         permissions: CapabilityPolicy {
             can_egress: vec![],
             can_persist: false,
             can_teleport: true,
+            is_genesis_factory: false,
+            can_fork: false,
         },
     };
 
@@ -176,8 +211,9 @@ async fn test_mediated_lazarus() {
         parent_snapshot_id: None,
         call_depth: 0,
         voucher: None,
-        manifest: Some(manifest),
         egress_policy: None,
+        target_function: None,
+        manifest: Some(manifest),
     };
     source_sandbox.execute(req).await.unwrap();
 
@@ -188,8 +224,14 @@ async fn test_mediated_lazarus() {
         use_registry: true,
     };
 
-    let receipt = teleport_req.execute(source_sandbox.clone() as Arc<dyn TetSandbox>, Some(oci_client)).await.unwrap();
-    
+    let receipt = teleport_req
+        .execute(
+            source_sandbox.clone() as Arc<dyn TetSandbox>,
+            Some(oci_client),
+        )
+        .await
+        .unwrap();
+
     assert_eq!(receipt.target_address, format!("127.0.0.1:{}", port));
 
     // Wait for target to pull and resurrect
@@ -206,15 +248,25 @@ async fn test_split_brain_prevention() {
 
     // Setup Network
     let hive_peers = HivePeers::new();
-    let port = 8999;
+    let _port = 8999;
     std::env::set_var("TET_DISABLE_ECONOMIC_GUARD", "1");
 
     let (source_mesh, _) = TetMesh::new(10, hive_peers.clone());
-    let source_sandbox = Arc::new(WasmtimeSandbox::new(source_mesh.clone(), Arc::new(VoucherManager::new("source".to_string())), false, "source".to_string()).unwrap());
+    let source_sandbox = Arc::new(
+        WasmtimeSandbox::new(
+            source_mesh.clone(),
+            Arc::new(VoucherManager::new("source".to_string())),
+            false,
+            "source".to_string(),
+        )
+        .unwrap(),
+    );
 
     // Create Agent on Source
     let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
-    use tet_core::models::manifest::{AgentManifest, Metadata, ResourceConstraints, CapabilityPolicy};
+    use tet_core::models::manifest::{
+        AgentManifest, CapabilityPolicy, Metadata, ResourceConstraints,
+    };
     let manifest = AgentManifest {
         metadata: Metadata {
             name: "split-brain-agent".to_string(),
@@ -224,11 +276,14 @@ async fn test_split_brain_prevention() {
         constraints: ResourceConstraints {
             max_memory_pages: 16,
             fuel_limit: 1000000,
+            max_egress_bytes: 1_000_000,
         },
         permissions: CapabilityPolicy {
             can_egress: vec![],
             can_persist: false,
             can_teleport: true,
+            is_genesis_factory: false,
+            can_fork: false,
         },
     };
 
@@ -242,8 +297,9 @@ async fn test_split_brain_prevention() {
         parent_snapshot_id: None,
         call_depth: 0,
         voucher: None,
-        manifest: Some(manifest),
         egress_policy: None,
+        target_function: None,
+        manifest: Some(manifest),
     };
     source_sandbox.execute(req).await.unwrap();
 
@@ -257,9 +313,17 @@ async fn test_split_brain_prevention() {
     let reg_url = spawn_mock_registry().await;
     let oci_client = Arc::new(OciClient::new(reg_url, None));
 
-    let result = teleport_req.execute(source_sandbox.clone() as Arc<dyn TetSandbox>, Some(oci_client)).await;
+    let result = teleport_req
+        .execute(
+            source_sandbox.clone() as Arc<dyn TetSandbox>,
+            Some(oci_client),
+        )
+        .await;
     assert!(result.is_err());
 
     // Verify Source still retains the active agent after network failure
-    assert!(source_sandbox.resolve_local("split-brain-agent").await.is_some());
+    assert!(source_sandbox
+        .resolve_local("split-brain-agent")
+        .await
+        .is_some());
 }

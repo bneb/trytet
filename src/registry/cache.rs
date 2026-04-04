@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use std::fs;
 use anyhow::Result;
+use std::fs;
+use std::path::PathBuf;
 
 pub struct ArtifactCache {
     pub root_dir: PathBuf,
@@ -10,7 +10,7 @@ impl ArtifactCache {
     pub fn new() -> Result<Self> {
         let home_dir = home::home_dir().expect("Could not find home directory");
         let root_dir = home_dir.join(".tet").join("cache");
-        fs::create_dir_all(&root_dir.join("blobs"))?;
+        fs::create_dir_all(root_dir.join("blobs"))?;
         Ok(Self { root_dir })
     }
 

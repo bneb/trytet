@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 #[tokio::test]
 async fn test_hive_deserialization_bomb() {
     let peers = HivePeers::new();
-    let server = HiveServer::new(peers.clone());
+    let server = HiveServer::new(peers.clone(), None, None);
 
     let (mesh, _rx) = TetMesh::new(100, peers);
     let vm = Arc::new(VoucherManager::new("test_provider".to_string()));

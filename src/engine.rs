@@ -102,6 +102,14 @@ pub trait TetSandbox: Send + Sync {
 
     /// Phase 14: Mesh cleanup.
     async fn deregister(&self, alias: &str);
+
+    /// Phase 18.1: Publish a DHT update
+    async fn publish_dht_route(
+        &self,
+        alias: &str,
+        target_ip: &str,
+        signature: &str,
+    ) -> Result<(), String>;
 }
 
 /// Errors that can occur at the engine infrastructure level.

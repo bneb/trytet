@@ -41,21 +41,34 @@ async fn main() -> anyhow::Result<()> {
     let (mesh, call_rx) = tet_core::mesh::TetMesh::new(100, hive_peers.clone());
 
     let registry_client = if let Ok(url) = std::env::var("REGISTRY_URL") {
-        Some(Arc::new(tet_core::registry::oci::OciClient::new(url, std::env::var("REGISTRY_TOKEN").ok())))
+        Some(Arc::new(tet_core::registry::oci::OciClient::new(
+            url,
+            std::env::var("REGISTRY_TOKEN").ok(),
+        )))
     } else {
         None
     };
 
-    let hive_server = tet_core::hive::HiveServer::new(hive_peers.clone(), registry_client.clone(), None);
+    let hive_server =
+        tet_core::hive::HiveServer::new(hive_peers.clone(), registry_client.clone(), None);
     let mesh_clone = mesh.clone();
 
     let local_node_id = uuid::Uuid::new_v4().to_string(); // In a real node, load from config
     let voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(
         local_node_id.clone(),
     ));
+
+    // Phase 16.1: Initialize the TelemetryHub for observability
+    let telemetry = Arc::new(tet_core::telemetry::TelemetryHub::default_capacity());
+
     let sandbox = WasmtimeSandbox::new(mesh, voucher_manager, true, local_node_id)
-        .expect("Failed to initialize Wasmtime engine");
+        .expect("Failed to initialize Wasmtime engine")
+        .with_telemetry(telemetry.clone());
     tracing::info!("Wasmtime engine pre-warmed with async support and Wasm Fuel enabled");
+    tracing::info!(
+        "TelemetryHub initialized ({} subscriber slots)",
+        telemetry.subscriber_count()
+    );
 
     let sandbox = Arc::new(sandbox);
 
@@ -81,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
         registry,
         registry_client, // Provided by environment
         hive: Some(hive_peers),
+        gateway: Arc::new(tet_core::gateway::SovereignGateway::default()),
         ingress_routes: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     });
 

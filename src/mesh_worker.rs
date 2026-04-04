@@ -53,6 +53,7 @@ pub fn spawn_mesh_worker(sandbox: Arc<WasmtimeSandbox>, mut rx: mpsc::Receiver<M
                         voucher: None,
                         manifest: None,
                         egress_policy: None,
+                        target_function: req.target_function,
                     };
 
                     let result = sandbox.execute(execution_req).await;
@@ -86,6 +87,22 @@ pub fn spawn_mesh_worker(sandbox: Arc<WasmtimeSandbox>, mut rx: mpsc::Receiver<M
                             });
                         }
                     }
+                }
+                MeshMessage::Fork { req } => {
+                    let sandbox = sandbox.clone();
+                    tokio::spawn(async move {
+                        // For a fork, we boot an entirely new Tet replica
+                        let _ = sandbox.execute(*req).await;
+                    });
+                }
+                MeshMessage::EconomyPacket(pkt) => {
+                    // Locally broadcast or log the economy packet
+                    println!("TET-MESH: Routing Economy Packet: {:?}", pkt);
+                    // In a production system, this routes over sandbox.mesh.hive_peers
+                }
+                MeshMessage::Reclaim { child_id } => {
+                    println!("TET-MESH: Processing Reclaim for process: {}", child_id);
+                    // Reclaim remaining fuel via registry integration, then shut down Sandbox Instance!
                 }
             }
         }

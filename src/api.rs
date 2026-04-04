@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub mod context;
+pub mod console;
 
 // ---------------------------------------------------------------------------
 // Application State
@@ -33,6 +34,7 @@ pub struct AppState {
     pub registry: Arc<dyn crate::registry::Registry>,
     pub registry_client: Option<Arc<crate::registry::oci::OciClient>>,
     pub hive: Option<crate::hive::HivePeers>,
+    pub gateway: Arc<crate::gateway::SovereignGateway>,
     pub ingress_routes: Arc<RwLock<HashMap<String, crate::oracle::IngressRoute>>>,
 }
 
@@ -76,9 +78,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/topology", axum::routing::get(handle_topology))
         .route("/v1/swarm/up", post(handle_swarm_up))
         .route(
+            "/v1/swarm/metrics",
+            axum::routing::get(handle_northstar_metrics),
+        )
+        .route(
             "/health",
             axum::routing::get(crate::server::health::handle_health),
         )
+        .route("/console", axum::routing::get(console::serve_console_page))
         .layer(DefaultBodyLimit::max(1024 * 1024 * 50)) // 50MB limit
         .with_state(state)
 }
@@ -124,6 +131,7 @@ async fn handle_topup(
         voucher: Some(payload.voucher),
         manifest: None,
         egress_policy: None,
+        target_function: None,
     };
 
     // 3. Resuscitate (Fork natively replaces the existing execution alias stream)
@@ -252,8 +260,6 @@ async fn handle_fork(
     }
 }
 
-
-
 async fn handle_export(
     State(state): State<Arc<AppState>>,
     Path(snapshot_id): Path<String>,
@@ -335,10 +341,12 @@ pub async fn handle_teleport(
     Path(alias): Path<String>,
     Json(req_data): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-    let target_node_id = req_data["target_node"].as_str().ok_or_else(|| (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({"error": "Missing target_node"}))
-    ))?;
+    let target_node_id = req_data["target_node"].as_str().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing target_node"})),
+        )
+    })?;
 
     let hive = match &state.hive {
         Some(h) => h,
@@ -373,18 +381,19 @@ pub async fn handle_teleport(
         use_registry: req_data["use_registry"].as_bool().unwrap_or(false),
     };
 
-    match teleport_req.execute(state.sandbox.clone(), state.registry_client.clone()).await {
-        Ok(receipt) => {
-            Ok(Json(serde_json::json!({
-                "status": "success",
-                "message": format!("Teleported {} bytes to {}", receipt.bytes_transferred, receipt.target_address),
-                "receipt": {
-                    "agent_id": receipt.agent_id,
-                    "target": receipt.target_address,
-                    "bytes": receipt.bytes_transferred
-                }
-            })))
-        }
+    match teleport_req
+        .execute(state.sandbox.clone(), state.registry_client.clone())
+        .await
+    {
+        Ok(receipt) => Ok(Json(serde_json::json!({
+            "status": "success",
+            "message": format!("Teleported {} bytes to {}", receipt.bytes_transferred, receipt.target_address),
+            "receipt": {
+                "agent_id": receipt.agent_id,
+                "target": receipt.target_address,
+                "bytes": receipt.bytes_transferred
+            }
+        }))),
         Err(e) => {
             let status = match e {
                 crate::teleport::TeleportError::PermissionDenied => StatusCode::FORBIDDEN,
@@ -401,7 +410,6 @@ pub async fn handle_teleport(
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Telemetry Endpoints
@@ -454,57 +462,42 @@ async fn handle_ingress_proxy(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     method: axum::http::Method,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-    let search_path = format!("/{}", path);
-    // Find the longest match in registered routes
-    let lock = state.ingress_routes.read().await;
+    // Determine alias vs path.
+    // Assuming format is `/ingress/{alias}/{...path}`
+    let mut parts = path.splitn(2, '/');
+    let alias = parts.next().unwrap_or_default().to_string();
+    let subpath = parts.next().unwrap_or_default().to_string();
+    let formatted_path = format!("/{}", subpath);
 
-    let route = lock
-        .values()
-        .find(|r| search_path.starts_with(&r.public_path))
-        .cloned();
-    drop(lock);
-
-    if let Some(r) = route {
-        if !r.method_filter.contains(&method.to_string()) && !r.method_filter.is_empty() {
-            return Err((
-                StatusCode::METHOD_NOT_ALLOWED,
-                "Method not allowed for this Trytet Ingress Route".to_string(),
-            ));
+    let mut header_map = std::collections::HashMap::new();
+    for (name, value) in headers.iter() {
+        if let Ok(v) = value.to_str() {
+            header_map.insert(name.as_str().to_string(), v.to_string());
         }
+    }
 
-        // Wrap as Mesh Call
-        let req = crate::models::MeshCallRequest {
-            target_alias: r.target_alias.clone(),
-            method: method.to_string(),
-            payload: body.to_vec(),
-            fuel_to_transfer: 10_000_000,
-            current_depth: 0,
-        };
+    let req = crate::gateway::GatewayRequest {
+        alias,
+        path: formatted_path,
+        method: method.to_string(),
+        body: body.to_vec(),
+        headers: header_map,
+    };
 
-        match state.sandbox.send_mesh_call(req).await {
-            Ok(res) => {
-                if res.status != crate::models::ExecutionStatus::Success {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Target Tet returned an Error Status".to_string(),
-                    ));
-                }
-
-                // Return exactly what the agent wrote back to memory natively
-                Ok((StatusCode::OK, res.return_data))
-            }
-            Err(e) => {
-                let e_msg = format!("Trytet Mesh Invocation failed: {:?}", e);
-                Err((StatusCode::BAD_GATEWAY, e_msg))
-            }
-        }
-    } else {
-        Err((
+    match state
+        .gateway
+        .handle_request(req, state.sandbox.clone())
+        .await
+    {
+        Ok(res) => Ok((StatusCode::OK, res)),
+        Err(crate::gateway::GatewayError::RouteNotFound) => Err((
             StatusCode::NOT_FOUND,
             "No Trytet Ingress mapped to this path".to_string(),
-        ))
+        )),
+        Err(e) => Err((StatusCode::BAD_GATEWAY, format!("Gateway Error: {}", e))),
     }
 }
 
@@ -574,4 +567,20 @@ pub async fn handle_swarm_up(
             format!("Orchestration Failed: {}", e),
         )),
     }
+}
+
+/// GET /v1/swarm/metrics
+///
+/// Runs the Northstar Benchmarking Suite and returns a JSON report
+/// compatible with Prometheus/Grafana external visualization.
+///
+/// This endpoint is intentionally synchronous and blocking — it measures
+/// real performance characteristics of the local node. Typical execution
+/// time is 200-500ms depending on hardware.
+async fn handle_northstar_metrics(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
+    let report = tokio::task::spawn_blocking(crate::benchmarks::run_full_suite)
+        .await
+        .unwrap_or_default();
+
+    (StatusCode::OK, Json(report))
 }

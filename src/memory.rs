@@ -118,7 +118,7 @@ impl Default for VectorShard {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VectorVfs {
-    pub shards: Vec<Arc<VectorShard>>,
+    pub store: crate::shards::LayeredVectorStore,
     #[serde(skip)]
     pub compaction_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
@@ -131,16 +131,64 @@ impl Default for VectorVfs {
 
 impl VectorVfs {
     pub fn new() -> Self {
-        let mut shards = Vec::with_capacity(NUM_SHARDS);
-        for _ in 0..NUM_SHARDS {
-            shards.push(Arc::new(VectorShard::default()));
-        }
         let mut vfs = Self {
-            shards,
+            store: crate::shards::LayeredVectorStore::new(),
             compaction_tx: None,
         };
         vfs.start_background_worker();
         vfs
+    }
+
+    /// Create a CoW clone of this VFS for a child agent
+    pub fn spawn_cow_child(&mut self, child_id: &str) -> Result<Self, crate::engine::TetError> {
+        // 1. Mark current 'active_layer' as READ-ONLY
+        self.store.active_layer.is_readonly = true;
+        self.store.active_layer.serialize_to_disk();
+
+        // 2. Both parent and child push this finalized layer to their base_layers
+        let frozen_layer = self.store.active_layer.clone(); // This uses our custom Clone which increments RefCount
+        self.store.base_layers.push(frozen_layer.clone());
+
+        let mut child_store = crate::shards::LayeredVectorStore {
+            base_layers: self.store.base_layers.clone(),
+            active_layer: self.store.active_layer.clone(), // placeholder
+        };
+
+        let host_dir = home::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .join(".trytet")
+            .join("vfs_layers");
+
+        // 3. Create fresh 'active_layer' (Delta) for the Parent
+        let parent_active_path = host_dir.join(format!("{}_parent.zst", uuid::Uuid::new_v4()));
+        let mut p_shards = Vec::with_capacity(NUM_SHARDS);
+        for _ in 0..NUM_SHARDS {
+            p_shards.push(Arc::new(VectorShard::default()));
+        }
+        self.store.active_layer = crate::shards::VfsLayer::new(parent_active_path, false, p_shards);
+
+        // 4. Create fresh 'active_layer' (Delta) for the Child
+        let child_active_path = host_dir.join(format!("{}_{}.zst", uuid::Uuid::new_v4(), child_id));
+        let mut c_shards = Vec::with_capacity(NUM_SHARDS);
+        for _ in 0..NUM_SHARDS {
+            c_shards.push(Arc::new(VectorShard::default()));
+        }
+        child_store.active_layer = crate::shards::VfsLayer::new(child_active_path, false, c_shards);
+
+        let mut vfs = Self {
+            store: child_store,
+            compaction_tx: None,
+        };
+        vfs.start_background_worker();
+
+        Ok(vfs)
+    }
+
+    pub fn forget(&self, record_id: &str) {
+        self.store
+            .active_layer
+            .tombstones
+            .insert(record_id.to_string());
     }
 
     pub fn start_background_worker(&mut self) {
@@ -149,7 +197,10 @@ impl VectorVfs {
         }
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         self.compaction_tx = Some(tx);
-        let shards_clone = self.shards.clone();
+        let shards_clone = match self.store.active_layer.memory_shards.as_ref() {
+            Some(s) => s.clone(),
+            None => return,
+        };
 
         tokio::spawn(async move {
             while let Some(collection) = rx.recv().await {
@@ -174,7 +225,21 @@ impl VectorVfs {
         let mut hasher = AHasher::default();
         collection.hash(&mut hasher);
         let idx = (hasher.finish() as usize) % NUM_SHARDS;
-        self.shards[idx].clone()
+        self.store.active_layer.memory_shards.as_ref().unwrap()[idx].clone()
+    }
+
+    fn get_shard_from_layer(
+        &self,
+        layer: &crate::shards::VfsLayer,
+        collection: &str,
+    ) -> Option<Arc<VectorShard>> {
+        if let Some(shards) = &layer.memory_shards {
+            let mut hasher = AHasher::default();
+            collection.hash(&mut hasher);
+            let idx = (hasher.finish() as usize) % NUM_SHARDS;
+            return Some(shards[idx].clone());
+        }
+        None
     }
 
     fn get_collection(&self, collection: &str) -> Arc<VectorCollection> {
@@ -203,49 +268,76 @@ impl VectorVfs {
             self.compact_collection(collection);
         }
 
+        self.store.active_layer.tombstones.remove(&record.id);
         col.tier1.records.insert(record.id.clone(), record);
     }
 
-    /// Performs sub-millisecond similarity graph traversal bridging Tiers 1 and 2.
+    /// Performs sub-millisecond similarity graph traversal bridging Tiers 1 and 2, and layers.
     pub fn recall(&self, query: &SearchQuery) -> Vec<SearchResult> {
-        let col = self.get_collection(&query.collection);
         let qp = CosinePoint(query.query_vector.clone());
-
         let mut out = Vec::new();
 
-        // Scan Tier 1 (brute-force on small hot append buffer)
-        for kv in col.tier1.records.iter() {
-            let record = kv.value();
-            let rp = CosinePoint(record.vector.clone());
-            let score = 1.0 - qp.distance(&rp);
-            if score >= query.min_score {
-                out.push((score, record.clone()));
-            }
+        let mut layers = Vec::new();
+        layers.push(&self.store.active_layer);
+        for base in self.store.base_layers.iter().rev() {
+            layers.push(base);
         }
 
-        // Scan Tier 2 HNSW Immutable geometric index
-        let t2 = col.tier2.read().unwrap().clone();
-        if let Some(idx) = &t2.index {
-            let mut search = Search::default();
-            let results = idx.search(&qp, &mut search);
+        let mut seen = std::collections::HashSet::new();
 
-            for r in results.take(query.limit as usize) {
-                let score = 1.0 - r.distance;
-                if score >= query.min_score {
-                    if let Some(record) = t2.records.iter().find(|rec| rec.id == *r.value) {
-                        // Prevent duplicate returns if compacting
-                        if !out.iter().any(|(_, t1_rec)| t1_rec.id == record.id) {
+        for layer in layers {
+            for tb in layer.tombstones.iter() {
+                seen.insert(tb.key().clone());
+            }
+
+            if let Some(shard) = self.get_shard_from_layer(layer, &query.collection) {
+                if let Some(col) = shard.collections.get(&query.collection) {
+                    // Scan Tier 1
+                    for kv in col.tier1.records.iter() {
+                        let record = kv.value();
+                        if seen.contains(&record.id) {
+                            continue;
+                        }
+
+                        let rp = CosinePoint(record.vector.clone());
+                        let score = 1.0 - qp.distance(&rp);
+                        if score >= query.min_score {
                             out.push((score, record.clone()));
+                            seen.insert(record.id.clone());
                         }
                     }
-                }
-            }
-        } else if !t2.records.is_empty() {
-            for r in &t2.records {
-                let rp = CosinePoint(r.vector.clone());
-                let score = 1.0 - qp.distance(&rp);
-                if score >= query.min_score && !out.iter().any(|(_, t1_rec)| t1_rec.id == r.id) {
-                    out.push((score, r.clone()));
+
+                    // Scan Tier 2
+                    let t2 = col.tier2.read().unwrap().clone();
+                    if let Some(idx) = &t2.index {
+                        let mut search = Search::default();
+                        let results = idx.search(&qp, &mut search);
+
+                        for r in results.take((query.limit * 5) as usize) {
+                            let score = 1.0 - r.distance;
+                            if score >= query.min_score
+                                && !seen.contains(r.value) {
+                                    if let Some(record) =
+                                        t2.records.iter().find(|rec| rec.id == *r.value)
+                                    {
+                                        out.push((score, record.clone()));
+                                        seen.insert(record.id.clone());
+                                    }
+                                }
+                        }
+                    } else if !t2.records.is_empty() {
+                        for r in &t2.records {
+                            if seen.contains(&r.id) {
+                                continue;
+                            }
+                            let rp = CosinePoint(r.vector.clone());
+                            let score = 1.0 - qp.distance(&rp);
+                            if score >= query.min_score {
+                                out.push((score, r.clone()));
+                                seen.insert(r.id.clone());
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -253,10 +345,10 @@ impl VectorVfs {
         out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         out.into_iter()
             .take(query.limit as usize)
-            .map(|(s, r)| SearchResult {
-                id: r.id.clone(),
-                score: s,
-                metadata: r.metadata.clone(),
+            .map(|(score, r)| SearchResult {
+                id: r.id,
+                score,
+                metadata: r.metadata,
             })
             .collect()
     }
@@ -313,14 +405,16 @@ impl VectorVfs {
     }
 
     pub fn rebuild_all_indexes(&self) {
-        for shard in &self.shards {
-            let cols: Vec<String> = shard
-                .collections
-                .iter()
-                .map(|col| col.key().clone())
-                .collect();
-            for col in cols {
-                self.compact_collection(&col);
+        if let Some(shards) = &self.store.active_layer.memory_shards {
+            for shard in shards {
+                let cols: Vec<String> = shard
+                    .collections
+                    .iter()
+                    .map(|col| col.key().clone())
+                    .collect();
+                for col in cols {
+                    self.compact_collection(&col);
+                }
             }
         }
     }

@@ -1,9 +1,9 @@
-use tet_core::models::manifest::{AgentManifest, Metadata, ResourceConstraints, CapabilityPolicy};
-use tet_core::models::{TetExecutionRequest, ExecutionStatus};
-use tet_core::sandbox::WasmtimeSandbox;
-use tet_core::hive::{HivePeers, HiveServer, HiveClient, HiveCommand};
-use tet_core::teleport::{TeleportRequest, TeleportError};
 use std::sync::Arc;
+use tet_core::hive::{HivePeers, HiveServer};
+use tet_core::models::manifest::{AgentManifest, CapabilityPolicy, Metadata, ResourceConstraints};
+use tet_core::models::TetExecutionRequest;
+use tet_core::sandbox::WasmtimeSandbox;
+use tet_core::teleport::{TeleportError, TeleportRequest};
 use tokio::net::TcpListener;
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn test_teleport_permission_denied() {
     let node_id = "test-node-1".to_string();
     let voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(node_id.clone()));
     let sandbox = Arc::new(WasmtimeSandbox::new(mesh, voucher_manager, false, node_id).unwrap());
-    
+
     let manifest = AgentManifest {
         metadata: Metadata {
             name: "no-teleport-agent".to_string(),
@@ -24,11 +24,14 @@ async fn test_teleport_permission_denied() {
         constraints: ResourceConstraints {
             max_memory_pages: 16,
             fuel_limit: 1000000,
+            max_egress_bytes: 1_000_000,
         },
         permissions: CapabilityPolicy {
             can_egress: vec![],
             can_persist: false,
             can_teleport: false, // DENIED
+            is_genesis_factory: false,
+            can_fork: false,
         },
     };
 
@@ -45,10 +48,14 @@ async fn test_teleport_permission_denied() {
         voucher: None,
         manifest: Some(manifest),
         egress_policy: None,
+        target_function: None,
     };
 
     use tet_core::engine::TetSandbox;
-    let _ = sandbox.execute(req).await.expect("Sandbox execution failed");
+    let _ = sandbox
+        .execute(req)
+        .await
+        .expect("Sandbox execution failed");
 
     let teleport_req = TeleportRequest {
         agent_id: "no-teleport-agent".to_string(),
@@ -56,7 +63,9 @@ async fn test_teleport_permission_denied() {
         use_registry: false,
     };
 
-    let result = teleport_req.execute(sandbox.clone() as Arc<dyn TetSandbox>, None).await;
+    let result = teleport_req
+        .execute(sandbox.clone() as Arc<dyn TetSandbox>, None)
+        .await;
     dbg!(&result);
     assert!(matches!(result, Err(TeleportError::PermissionDenied)));
 }
@@ -67,24 +76,39 @@ async fn test_teleport_atomic_handoff() {
     let target_peers = HivePeers::new();
     let (target_mesh, _target_rx) = tet_core::mesh::TetMesh::new(1024, target_peers.clone());
     let target_node_id = "target-node".to_string();
-    let target_voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(target_node_id.clone()));
-    let target_sandbox = Arc::new(WasmtimeSandbox::new(target_mesh, target_voucher_manager, false, target_node_id).unwrap());
+    let target_voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(
+        target_node_id.clone(),
+    ));
+    let target_sandbox = Arc::new(
+        WasmtimeSandbox::new(target_mesh, target_voucher_manager, false, target_node_id).unwrap(),
+    );
     let target_server = HiveServer::new(target_peers, None, None);
-    
+
     // Find free port
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let target_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    target_server.start(target_port, target_sandbox.mesh.clone(), target_sandbox.clone()).await.unwrap();
+    target_server
+        .start(
+            target_port,
+            target_sandbox.mesh.clone(),
+            target_sandbox.clone(),
+        )
+        .await
+        .unwrap();
 
     // 2. Start Source Node and Counter Agent
     let source_peers = HivePeers::new();
     let (source_mesh, _source_rx) = tet_core::mesh::TetMesh::new(1024, source_peers.clone());
     let source_node_id = "source-node".to_string();
-    let source_voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(source_node_id.clone()));
-    let source_sandbox = Arc::new(WasmtimeSandbox::new(source_mesh, source_voucher_manager, false, source_node_id).unwrap());
-    
+    let source_voucher_manager = Arc::new(tet_core::economy::VoucherManager::new(
+        source_node_id.clone(),
+    ));
+    let source_sandbox = Arc::new(
+        WasmtimeSandbox::new(source_mesh, source_voucher_manager, false, source_node_id).unwrap(),
+    );
+
     let manifest = AgentManifest {
         metadata: Metadata {
             name: "counter-agent".to_string(),
@@ -94,11 +118,14 @@ async fn test_teleport_atomic_handoff() {
         constraints: ResourceConstraints {
             max_memory_pages: 16,
             fuel_limit: 1000000,
+            max_egress_bytes: 1_000_000,
         },
         permissions: CapabilityPolicy {
             can_egress: vec![],
             can_persist: false,
             can_teleport: true, // ALLOWED
+            is_genesis_factory: false,
+            can_fork: false,
         },
     };
 
@@ -115,10 +142,14 @@ async fn test_teleport_atomic_handoff() {
         voucher: None,
         manifest: Some(manifest),
         egress_policy: None,
+        target_function: None,
     };
 
     use tet_core::engine::TetSandbox;
-    let _ = source_sandbox.execute(req).await.expect("Source execution failed");
+    let _ = source_sandbox
+        .execute(req)
+        .await
+        .expect("Source execution failed");
 
     // 3. Teleport!
     let teleport_req = TeleportRequest {
@@ -127,17 +158,25 @@ async fn test_teleport_atomic_handoff() {
         use_registry: false,
     };
 
-    let receipt = teleport_req.execute(source_sandbox.clone() as Arc<dyn TetSandbox>, None).await.expect("Teleport failed");
+    let receipt = teleport_req
+        .execute(source_sandbox.clone() as Arc<dyn TetSandbox>, None)
+        .await
+        .expect("Teleport failed");
     assert!(receipt.bytes_transferred > 0);
 
     // 4. Verify resurrection on target node
     // Wait a bit for the async task to finish resurrection
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    
-    let resolved: Option<tet_core::models::TetMetadata> = target_sandbox.resolve_local("counter-agent").await;
+
+    let resolved: Option<tet_core::models::TetMetadata> =
+        target_sandbox.resolve_local("counter-agent").await;
     assert!(resolved.is_some(), "Agent should exist on target node");
-    
+
     // 5. Verify purge on source node
-    let resolved_source: Option<tet_core::models::TetMetadata> = source_sandbox.resolve_local("counter-agent").await;
-    assert!(resolved_source.is_none(), "Agent should be purged from source node");
+    let resolved_source: Option<tet_core::models::TetMetadata> =
+        source_sandbox.resolve_local("counter-agent").await;
+    assert!(
+        resolved_source.is_none(),
+        "Agent should be purged from source node"
+    );
 }

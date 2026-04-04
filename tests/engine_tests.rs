@@ -44,6 +44,8 @@ fn make_request(wat: &str, allocated_fuel: u64) -> TetExecutionRequest {
         call_depth: 0,
         voucher: None,
         egress_policy: None,
+        target_function: None,
+        manifest: None,
     }
 }
 
@@ -283,6 +285,8 @@ async fn test_env_variables_injected() {
         call_depth: 0,
         voucher: None,
         egress_policy: None,
+        target_function: None,
+        manifest: None,
     };
 
     let result = sandbox.execute(req).await.unwrap();
@@ -475,6 +479,8 @@ async fn test_concurrent_executions() {
                 call_depth: 0,
                 voucher: None,
                 egress_policy: None,
+                target_function: None,
+                manifest: None,
             };
             sandbox.execute(req).await.unwrap()
         }));

@@ -10,8 +10,8 @@ pub fn estimate_tokens(blocks: &[InputContentBlock]) -> usize {
     }
 
     // Safety markup of 15%
-    let t_total = (total_tokens as f64 * 1.15).ceil() as usize;
-    t_total
+    
+    (total_tokens as f64 * 1.15).ceil() as usize
 }
 
 /// Calculate specific block length via the same heuristic without safety buffer.

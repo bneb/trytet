@@ -1,9 +1,9 @@
-use crate::builder::{TetArtifact, BuildError};
+use crate::builder::{BuildError, TetArtifact};
+use crate::mesh::TetMesh;
 use crate::models::{TetExecutionRequest, TetExecutionResult};
 use crate::sandbox::WasmtimeSandbox;
-use crate::mesh::TetMesh;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -35,11 +35,16 @@ impl ResurrectionContext {
         // 2. VFS Decompression (Zstd)
         let decompressed_tarball = match zstd::stream::decode_all(&self.artifact.vfs_zstd[..]) {
             Ok(d) => d,
-            Err(e) => return Err(RuntimeError::SecurityViolation(format!("VFS decompression failed: {}", e))),
+            Err(e) => {
+                return Err(RuntimeError::SecurityViolation(format!(
+                    "VFS decompression failed: {}",
+                    e
+                )))
+            }
         };
-        
+
         let fuel = fuel_override.unwrap_or(self.artifact.manifest.constraints.fuel_limit);
-        
+
         // We evaluate requested permissions into EgressPolicy
         let policy = if !self.artifact.manifest.permissions.can_egress.is_empty() {
             Some(crate::oracle::EgressPolicy {
@@ -50,19 +55,22 @@ impl ResurrectionContext {
         } else {
             None
         };
-        
+
         let request = TetExecutionRequest {
             payload: Some(self.artifact.blueprint_wasm.clone()),
             alias: Some(self.artifact.manifest.metadata.name.clone()),
             env: std::collections::HashMap::new(),
-            injected_files: std::collections::HashMap::new(), 
+            injected_files: std::collections::HashMap::new(),
             allocated_fuel: fuel,
-            max_memory_mb: (self.artifact.manifest.constraints.max_memory_pages * 65536 / 1024 / 1024) as u32,
+            max_memory_mb: (self.artifact.manifest.constraints.max_memory_pages * 65536
+                / 1024
+                / 1024),
             parent_snapshot_id: None,
             call_depth: 0,
             voucher: None,
             manifest: Some(self.artifact.manifest.clone()),
             egress_policy: policy,
+            target_function: None,
         };
 
         // 3. Wasmtime Provisioning
@@ -72,7 +80,12 @@ impl ResurrectionContext {
             .map_err(|e| RuntimeError::Engine(e.to_string()))?;
 
         // 5. Start Execution
-        let result = sandbox.boot_artifact(&self.artifact.blueprint_wasm, &request, Some(&decompressed_tarball))
+        let result = sandbox
+            .boot_artifact(
+                &self.artifact.blueprint_wasm,
+                &request,
+                Some(&decompressed_tarball),
+            )
             .await
             .map_err(|e| RuntimeError::Engine(e.to_string()))?;
 
@@ -82,9 +95,7 @@ impl ResurrectionContext {
             let p = vfs_path.join(filename);
             fs::write(p, content)?;
         }
-        
-        Ok(ActiveAgent {
-            result: result.0,
-        })
+
+        Ok(ActiveAgent { result: result.0 })
     }
 }

@@ -18,8 +18,8 @@ async fn test_phase_23_browser_handoff() {
         inference_state: vec![],
     };
 
-    assert!(payload.wasm_bytes.len() > 0, "Payload wasm missing");
-    assert!(payload.memory_bytes.len() > 0, "Payload memory missing");
+    assert!(!payload.wasm_bytes.is_empty(), "Payload wasm missing");
+    assert!(!payload.memory_bytes.is_empty(), "Payload memory missing");
 
     // Polyfill validation - WebNativeSandbox hydration
     // For now we check the payload integrity

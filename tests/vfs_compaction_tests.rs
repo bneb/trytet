@@ -14,7 +14,7 @@ async fn test_vfs_concurrent_compaction() {
         let vfs_clone = vfs.clone();
         handles.push(tokio::spawn(async move {
             let start = Instant::now();
-            let col = format!("collection_bench"); // Use the same collection or distinct?
+            let col = "collection_bench".to_string(); // Use the same collection or distinct?
                                                    // Using same collection forces contention!
             for i in 0..250 {
                 // 250 * 10 = 2500 breaches 2048

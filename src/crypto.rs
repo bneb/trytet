@@ -1,5 +1,4 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rand::Rng;
 use std::fs;
 use std::path::PathBuf;
 
@@ -26,8 +25,7 @@ impl AgentWallet {
                 .map_err(|_| anyhow::anyhow!("Invalid key length"))?;
             SigningKey::from_bytes(&array)
         } else {
-            let mut key_bytes = [0u8; 32];
-            rand::rng().fill_bytes(&mut key_bytes);
+            let key_bytes: [u8; 32] = rand::random();
             let new_key = SigningKey::from_bytes(&key_bytes);
             fs::write(&key_path, new_key.to_bytes())?;
             new_key
@@ -44,6 +42,11 @@ impl AgentWallet {
     pub fn sign_manifest(&self, payload: &[u8]) -> String {
         let signature = self.signing_key.sign(payload);
         hex::encode(signature.to_bytes())
+    }
+
+    pub fn sign_bytes(&self, payload: &[u8]) -> Vec<u8> {
+        let signature = self.signing_key.sign(payload);
+        signature.to_bytes().to_vec()
     }
 
     pub fn verify_signature(pubkey_hex: &str, payload: &[u8], signature_hex: &str) -> bool {

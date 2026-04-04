@@ -45,6 +45,10 @@ pub struct TetExecutionRequest {
     /// Optional: If provided, fork from this existing memory state ID.
     pub parent_snapshot_id: Option<String>,
 
+    /// The exported Wasm function to execute. If None, uses `_start`.
+    #[serde(default)]
+    pub target_function: Option<String>,
+
     /// Internal property to prevent infinite recursion.
     #[serde(default)]
     pub call_depth: u32,
@@ -178,6 +182,8 @@ pub struct MeshCallRequest {
     pub payload: Vec<u8>,
     pub fuel_to_transfer: u64,
     pub current_depth: u32,
+    #[serde(default)]
+    pub target_function: Option<String>,
 }
 
 /// The result returned from an inter-tet RPC.

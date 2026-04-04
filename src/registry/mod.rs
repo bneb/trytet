@@ -1,8 +1,10 @@
-pub mod oci;
 pub mod cache;
+pub mod oci;
+pub mod quorum;
 
-pub use oci::*;
 pub use cache::*;
+pub use oci::*;
+pub use quorum::*;
 
 use std::fs;
 use std::path::PathBuf;

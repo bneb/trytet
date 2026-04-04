@@ -51,6 +51,8 @@ async fn test_tar_extraction_starvation() {
         call_depth: 0,
         voucher: None,
         egress_policy: None,
+        target_function: None,
+        manifest: None,
     };
 
     let sandbox_clone = sandbox.clone();

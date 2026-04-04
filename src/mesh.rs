@@ -17,13 +17,21 @@ pub enum MeshMessage {
         req: MeshCallRequest,
         reply: oneshot::Sender<MeshCallResponse>,
     },
+    /// Natively spawn a new Tet instance from a given execution request (Biological auto-scaling).
+    Fork {
+        req: Box<crate::models::TetExecutionRequest>,
+    },
+    /// Route an economic transmission across the mesh.
+    EconomyPacket(crate::hive::HiveCommand),
+    /// Forcibly stops a designated child Agent Sandbox natively recovering spent fuel bounds.
+    Reclaim { child_id: String },
 }
 
 /// The Tet-Mesh handles discovery (Registry) and RPC routing.
 #[derive(Clone)]
 pub struct TetMesh {
-    /// Zero-Trust Registry mapping aliases -> TetMetadata
-    registry: Arc<RwLock<HashMap<String, TetMetadata>>>,
+    /// Zero-Trust Registry mapping aliases -> active instances
+    registry: Arc<RwLock<HashMap<String, Vec<TetMetadata>>>>,
     /// Router channel to send cross-Tet instructions.
     tx: mpsc::Sender<MeshMessage>,
     pub hive_peers: crate::hive::HivePeers,
@@ -87,13 +95,27 @@ impl TetMesh {
         self.topology.read().await.values().cloned().collect()
     }
 
-    /// Registers a new alias pointing to a Tet.
     pub async fn register(&self, alias: String, metadata: crate::models::TetMetadata) {
-        self.registry.write().await.insert(alias, metadata);
+        let mut reg = self.registry.write().await;
+        let entries = reg.entry(alias).or_default();
+        entries.push(metadata);
     }
 
     pub async fn resolve_local(&self, alias: &str) -> Option<crate::models::TetMetadata> {
-        self.registry.read().await.get(alias).cloned()
+        let reg = self.registry.read().await;
+        if let Some(entries) = reg.get(alias) {
+            if entries.is_empty() {
+                return None;
+            }
+            // Simple round-robin distribution for auto-scaling clones
+            let count = entries.len();
+            let idx = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as usize;
+            return Some(entries[idx % count].clone());
+        }
+        None
     }
 
     /// Resolves an alias by checking local registry, then broadcasting to Hive.
@@ -135,5 +157,38 @@ impl TetMesh {
         }
 
         reply_rx.await.map_err(|_| "Mesh call dropped")
+    }
+
+    /// Sends a fork execution request to be picked up by the mesh worker (Autonomous scaling execution)
+    pub async fn send_fork(
+        &self,
+        req: crate::models::TetExecutionRequest,
+    ) -> Result<(), &'static str> {
+        let msg = MeshMessage::Fork { req: Box::new(req) };
+        if self.tx.send(msg).await.is_err() {
+            return Err("Mesh channel closed");
+        }
+        Ok(())
+    }
+
+    /// Broadcasts an economy packet (like TransferCredit or BillRequest).
+    pub async fn send_economy_packet(
+        &self,
+        pkt: crate::hive::HiveCommand,
+    ) -> Result<(), &'static str> {
+        let msg = MeshMessage::EconomyPacket(pkt);
+        if self.tx.send(msg).await.is_err() {
+            return Err("Mesh channel closed");
+        }
+        Ok(())
+    }
+
+    /// Signals the termination and fuel sweep of an active workspace locally dynamically matching identities.
+    pub async fn send_reclaim(&self, child_id: String) -> Result<(), &'static str> {
+        let msg = MeshMessage::Reclaim { child_id };
+        if self.tx.send(msg).await.is_err() {
+            return Err("Mesh channel closed");
+        }
+        Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use crate::builder::TetArtifact;
-use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const MEDIA_TYPE_MANIFEST: &str = "application/vnd.trytet.manifest.v1+json";
 pub const MEDIA_TYPE_CONFIG: &str = "application/vnd.trytet.config.v1+json";
@@ -38,8 +38,11 @@ pub struct OciClient {
 impl OciClient {
     pub fn new(registry_url: String, token: Option<String>) -> Self {
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("User-Agent", reqwest::header::HeaderValue::from_static("tet-cli/1.0"));
-        
+        headers.insert(
+            "User-Agent",
+            reqwest::header::HeaderValue::from_static("tet-cli/1.0"),
+        );
+
         Self {
             registry_url,
             token,
@@ -56,18 +59,27 @@ impl OciClient {
 
     pub async fn push(&self, artifact: &TetArtifact, reference: &str) -> Result<()> {
         let (name, tag) = reference.split_once(':').unwrap_or((reference, "latest"));
-        
-        let wasm_digest = format!("sha256:{}", hex::encode(Sha256::digest(&artifact.blueprint_wasm)));
+
+        let wasm_digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(&artifact.blueprint_wasm))
+        );
         let vfs_digest = format!("sha256:{}", hex::encode(Sha256::digest(&artifact.vfs_zstd)));
-        let sig_digest = format!("sha256:{}", hex::encode(Sha256::digest(&artifact.signature)));
-        
+        let sig_digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(&artifact.signature))
+        );
+
         let config_json = serde_json::to_vec(&artifact.manifest)?;
         let config_digest = format!("sha256:{}", hex::encode(Sha256::digest(&config_json)));
 
         // Upload Blobs
-        self.upload_blob(name, &wasm_digest, &artifact.blueprint_wasm).await?;
-        self.upload_blob(name, &vfs_digest, &artifact.vfs_zstd).await?;
-        self.upload_blob(name, &sig_digest, &artifact.signature).await?;
+        self.upload_blob(name, &wasm_digest, &artifact.blueprint_wasm)
+            .await?;
+        self.upload_blob(name, &vfs_digest, &artifact.vfs_zstd)
+            .await?;
+        self.upload_blob(name, &sig_digest, &artifact.signature)
+            .await?;
         self.upload_blob(name, &config_digest, &config_json).await?;
 
         // Construct and Upload Manifest
@@ -100,18 +112,24 @@ impl OciClient {
 
         let manifest_json = serde_json::to_vec(&manifest)?;
         let url = format!("{}/v2/{}/manifests/{}", self.registry_url, name, tag);
-        
-        let mut req = self.http.put(&url)
+
+        let mut req = self
+            .http
+            .put(&url)
             .header("Content-Type", MEDIA_TYPE_MANIFEST)
             .body(manifest_json);
-            
+
         if let Some(auth) = self.get_auth_header() {
             req = req.header("Authorization", auth);
         }
 
         let res = req.send().await?;
         if !res.status().is_success() {
-            return Err(anyhow!("Failed to push manifest: {} - {}", res.status(), res.text().await?));
+            return Err(anyhow!(
+                "Failed to push manifest: {} - {}",
+                res.status(),
+                res.text().await?
+            ));
         }
 
         Ok(())
@@ -123,7 +141,7 @@ impl OciClient {
         if let Some(auth) = self.get_auth_header() {
             check_req = check_req.header("Authorization", auth);
         }
-        
+
         if check_req.send().await?.status().is_success() {
             return Ok(()); // Already exists
         }
@@ -133,16 +151,22 @@ impl OciClient {
         if let Some(auth) = self.get_auth_header() {
             start_req = start_req.header("Authorization", auth);
         }
-        
+
         let start_res = start_req.send().await?;
         if !start_res.status().is_success() {
-            return Err(anyhow!("Failed to start blob upload: {} - {}", start_res.status(), start_res.text().await?));
+            return Err(anyhow!(
+                "Failed to start blob upload: {} - {}",
+                start_res.status(),
+                start_res.text().await?
+            ));
         }
 
-        let location = start_res.headers().get("Location")
+        let location = start_res
+            .headers()
+            .get("Location")
             .ok_or_else(|| anyhow!("No location header in blob upload start"))?
             .to_str()?;
-            
+
         let mut final_url = if location.starts_with('/') {
             format!("{}{}", self.registry_url, location)
         } else {
@@ -155,18 +179,24 @@ impl OciClient {
             final_url = format!("{}?digest={}", final_url, digest);
         }
 
-        let mut put_req = self.http.put(&final_url)
+        let mut put_req = self
+            .http
+            .put(&final_url)
             .header("Content-Length", data.len())
             .header("Content-Type", "application/octet-stream")
             .body(data.to_vec());
-            
+
         if let Some(auth) = self.get_auth_header() {
             put_req = put_req.header("Authorization", auth);
         }
 
         let put_res = put_req.send().await?;
         if !put_res.status().is_success() {
-            return Err(anyhow!("Failed to upload blob: {} - {}", put_res.status(), put_res.text().await?));
+            return Err(anyhow!(
+                "Failed to upload blob: {} - {}",
+                put_res.status(),
+                put_res.text().await?
+            ));
         }
 
         Ok(())
@@ -174,29 +204,41 @@ impl OciClient {
 
     pub async fn pull(&self, reference: &str) -> Result<TetArtifact> {
         let (name, tag) = reference.split_once(':').unwrap_or((reference, "latest"));
-        
+
         let url = format!("{}/v2/{}/manifests/{}", self.registry_url, name, tag);
-        let mut req = self.http.get(&url)
-            .header("Accept", MEDIA_TYPE_MANIFEST);
-            
+        let mut req = self.http.get(&url).header("Accept", MEDIA_TYPE_MANIFEST);
+
         if let Some(auth) = self.get_auth_header() {
             req = req.header("Authorization", auth);
         }
 
         let res = req.send().await?;
         if !res.status().is_success() {
-            return Err(anyhow!("Failed to pull manifest: {} - {}", res.status(), res.text().await?));
+            return Err(anyhow!(
+                "Failed to pull manifest: {} - {}",
+                res.status(),
+                res.text().await?
+            ));
         }
-        
+
         let manifest: OciManifest = res.json().await?;
 
         // Parallel fetch of all layers and config
         let config_digest = manifest.config.digest.clone();
-        let wasm_desc = manifest.layers.iter().find(|l| l.media_type == MEDIA_TYPE_LAYER_WASM)
+        let wasm_desc = manifest
+            .layers
+            .iter()
+            .find(|l| l.media_type == MEDIA_TYPE_LAYER_WASM)
             .ok_or_else(|| anyhow!("Missing WASM layer"))?;
-        let vfs_desc = manifest.layers.iter().find(|l| l.media_type == MEDIA_TYPE_LAYER_VFS)
+        let vfs_desc = manifest
+            .layers
+            .iter()
+            .find(|l| l.media_type == MEDIA_TYPE_LAYER_VFS)
             .ok_or_else(|| anyhow!("Missing VFS layer"))?;
-        let sig_desc = manifest.layers.iter().find(|l| l.media_type == MEDIA_TYPE_LAYER_SIGNATURE)
+        let sig_desc = manifest
+            .layers
+            .iter()
+            .find(|l| l.media_type == MEDIA_TYPE_LAYER_SIGNATURE)
             .ok_or_else(|| anyhow!("Missing Signature layer"))?;
 
         let wasm_digest = wasm_desc.digest.clone();
@@ -225,12 +267,16 @@ impl OciClient {
         Ok(artifact)
     }
 
-    pub async fn push_state(&self, payload: &crate::sandbox::SnapshotPayload, reference: &str) -> Result<String> {
+    pub async fn push_state(
+        &self,
+        payload: &crate::sandbox::SnapshotPayload,
+        reference: &str,
+    ) -> Result<String> {
         let (name, tag) = reference.split_once(':').unwrap_or((reference, "latest"));
-        
+
         let state_bytes = bincode::serialize(payload)?;
         let state_digest = format!("sha256:{}", hex::encode(Sha256::digest(&state_bytes)));
-        
+
         // Use an empty JSON dict for config as placeholder for state manifest
         let config_json = b"{}".to_vec();
         let config_digest = format!("sha256:{}", hex::encode(Sha256::digest(&config_json)));
@@ -246,29 +292,33 @@ impl OciClient {
                 digest: config_digest.clone(),
                 size: config_json.len(),
             },
-            layers: vec![
-                OciDescriptor {
-                    media_type: MEDIA_TYPE_LAYER_STATE.to_string(),
-                    digest: state_digest.clone(),
-                    size: state_bytes.len(),
-                },
-            ],
+            layers: vec![OciDescriptor {
+                media_type: MEDIA_TYPE_LAYER_STATE.to_string(),
+                digest: state_digest.clone(),
+                size: state_bytes.len(),
+            }],
         };
 
         let manifest_json = serde_json::to_vec(&manifest)?;
         let url = format!("{}/v2/{}/manifests/{}", self.registry_url, name, tag);
-        
-        let mut req = self.http.put(&url)
+
+        let mut req = self
+            .http
+            .put(&url)
             .header("Content-Type", MEDIA_TYPE_STATE_MANIFEST)
             .body(manifest_json.clone());
-            
+
         if let Some(auth) = self.get_auth_header() {
             req = req.header("Authorization", auth);
         }
 
         let res = req.send().await?;
         if !res.status().is_success() {
-            return Err(anyhow!("Failed to push state manifest: {} - {}", res.status(), res.text().await?));
+            return Err(anyhow!(
+                "Failed to push state manifest: {} - {}",
+                res.status(),
+                res.text().await?
+            ));
         }
 
         let manifest_digest = format!("sha256:{}", hex::encode(Sha256::digest(&manifest_json)));
@@ -277,27 +327,36 @@ impl OciClient {
 
     pub async fn pull_state(&self, reference: &str) -> Result<crate::sandbox::SnapshotPayload> {
         let (name, tag) = reference.split_once(':').unwrap_or((reference, "latest"));
-        
+
         let url = format!("{}/v2/{}/manifests/{}", self.registry_url, name, tag);
-        let mut req = self.http.get(&url)
+        let mut req = self
+            .http
+            .get(&url)
             .header("Accept", MEDIA_TYPE_STATE_MANIFEST);
-            
+
         if let Some(auth) = self.get_auth_header() {
             req = req.header("Authorization", auth);
         }
 
         let res = req.send().await?;
         if !res.status().is_success() {
-            return Err(anyhow!("Failed to pull state manifest: {} - {}", res.status(), res.text().await?));
+            return Err(anyhow!(
+                "Failed to pull state manifest: {} - {}",
+                res.status(),
+                res.text().await?
+            ));
         }
-        
+
         let manifest: OciManifest = res.json().await?;
 
-        let state_desc = manifest.layers.iter().find(|l| l.media_type == MEDIA_TYPE_LAYER_STATE)
+        let state_desc = manifest
+            .layers
+            .iter()
+            .find(|l| l.media_type == MEDIA_TYPE_LAYER_STATE)
             .ok_or_else(|| anyhow!("Missing State layer"))?;
 
         let state_bytes = self.fetch_blob(name, &state_desc.digest).await?;
-        
+
         let payload: crate::sandbox::SnapshotPayload = bincode::deserialize(&state_bytes)?;
         Ok(payload)
     }
@@ -308,20 +367,24 @@ impl OciClient {
         if let Some(auth) = self.get_auth_header() {
             req = req.header("Authorization", auth);
         }
-        
+
         let res = req.send().await?;
         if !res.status().is_success() {
             return Err(anyhow!("Failed to fetch blob {}: {}", digest, res.status()));
         }
-        
+
         let data = res.bytes().await?.to_vec();
-        
+
         // Verify digest
         let actual_digest = format!("sha256:{}", hex::encode(Sha256::digest(&data)));
         if actual_digest != digest {
-            return Err(anyhow!("Digest mismatch: expected {}, got {}", digest, actual_digest));
+            return Err(anyhow!(
+                "Digest mismatch: expected {}, got {}",
+                digest,
+                actual_digest
+            ));
         }
-        
+
         Ok(data)
     }
 }

@@ -2,7 +2,6 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tokio::sync::RwLock;
 
 use tet_core::economy::VoucherManager;
 use tet_core::engine::TetSandbox;
@@ -42,6 +41,8 @@ async fn run_concurrent_invokes(scale: usize, wasm_bytes: Vec<u8>, sandbox: Arc<
             call_depth: 0,
             voucher: None,
             egress_policy: None,
+            target_function: None,
+            manifest: None,
         };
         let sbox = sandbox.clone();
         handles.push(tokio::spawn(async move {
@@ -175,6 +176,8 @@ fn bench_context_router(c: &mut Criterion) {
         b.iter(|| {
             let mut session = SwarmSession {
                 session_id: "bench_session".to_string(),
+                model_id: Some("bench_model".to_string()),
+                temperature: Some(0.7),
                 blocks: blocks.clone(),
             };
             let router = ContextRouter {

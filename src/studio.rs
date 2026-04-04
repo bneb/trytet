@@ -116,6 +116,7 @@ impl StudioOrchestrator {
                     voucher: None,
                     manifest: None,
                     egress_policy: None,
+                    target_function: None,
                 };
 
                 let res = sandbox_clone.execute(req).await;

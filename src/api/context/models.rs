@@ -41,6 +41,12 @@ impl InputContentBlock {
 pub struct SwarmSession {
     pub session_id: String,
     pub blocks: Vec<InputContentBlock>,
+    /// Phase 15.2: Model identifier for inference-aware context routing.
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// Phase 15.2: Temperature for deterministic cache keying.
+    #[serde(default)]
+    pub temperature: Option<f32>,
 }
 
 #[derive(Debug, Clone)]

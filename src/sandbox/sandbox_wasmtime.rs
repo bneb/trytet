@@ -15,7 +15,7 @@ use crate::models::{
 use async_trait::async_trait;
 use bincode::Options;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -83,6 +83,18 @@ struct TetState {
     pub egress_policy: Option<crate::oracle::EgressPolicy>,
     pub vector_vfs: Arc<crate::memory::VectorVfs>,
     pub inference_engine: Arc<dyn crate::inference::NeuralEngine>,
+    pub oracle: Arc<crate::oracle::MeshOracle>,
+    pub oracle_cache_dir: std::path::PathBuf,
+    pub model_proxy: Arc<crate::model_proxy::ModelProxy>,
+    pub telemetry: Arc<crate::telemetry::TelemetryHub>,
+    // Phase 17.1: Multi-Tenant Fortress
+    pub tet_id: String,
+    pub tenant_id: String,
+    pub author_pubkey: String,
+    pub quota_manager: Arc<crate::fortress::QuotaManager>,
+    pub max_egress_bytes: u64,
+    pub gateway: Arc<crate::gateway::SovereignGateway>,
+    pub market_handle: Arc<crate::market::HiveMarket>,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,12 +104,19 @@ struct TetState {
 pub struct WasmtimeSandbox {
     engine: Engine,
     snapshots: Arc<RwLock<HashMap<String, SnapshotPayload>>>,
-    active_memories: Arc<RwLock<HashMap<String, (SnapshotPayload, crate::models::manifest::AgentManifest)>>>,
+    active_memories:
+        Arc<RwLock<HashMap<String, (SnapshotPayload, crate::models::manifest::AgentManifest)>>>,
     pub mesh: TetMesh,
     pub voucher_manager: Arc<crate::economy::VoucherManager>,
     pub require_payment: bool,
     pub local_node_id: String,
     pub neural_engine: Arc<dyn crate::inference::NeuralEngine>,
+    pub oracle: Arc<crate::oracle::MeshOracle>,
+    pub model_proxy: Arc<crate::model_proxy::ModelProxy>,
+    pub telemetry: Arc<crate::telemetry::TelemetryHub>,
+    pub quota_manager: Arc<crate::fortress::QuotaManager>,
+    pub gateway: Arc<crate::gateway::SovereignGateway>,
+    pub market_handle: Arc<crate::market::HiveMarket>,
 }
 
 impl WasmtimeSandbox {
@@ -127,6 +146,16 @@ impl WasmtimeSandbox {
 
         let engine = Engine::new(&config).map_err(|e| TetError::EngineError(format!("{e:#}")))?;
 
+        let oracle =
+            Arc::new(crate::oracle::MeshOracle::new().map_err(|e| {
+                TetError::EngineError(format!("Failed to initialize MeshOracle: {e}"))
+            })?);
+
+        let model_proxy = Arc::new(crate::model_proxy::ModelProxy::new(
+            Arc::new(crate::model_proxy::MockInferenceProvider::new()),
+            oracle.clone(),
+        ));
+
         Ok(Self {
             engine,
             snapshots: Arc::new(RwLock::new(HashMap::new())),
@@ -134,9 +163,26 @@ impl WasmtimeSandbox {
             mesh,
             voucher_manager,
             require_payment,
-            local_node_id,
+            local_node_id: local_node_id.clone(),
             neural_engine,
+            oracle,
+            model_proxy,
+            telemetry: Arc::new(crate::telemetry::TelemetryHub::noop()),
+            quota_manager: Arc::new(crate::fortress::QuotaManager::new()),
+            gateway: Arc::new(crate::gateway::SovereignGateway::default()),
+            market_handle: Arc::new(crate::market::HiveMarket::new(local_node_id)),
         })
+    }
+
+    pub fn with_gateway(mut self, gateway: Arc<crate::gateway::SovereignGateway>) -> Self {
+        self.gateway = gateway;
+        self
+    }
+
+    /// Set the telemetry hub on this sandbox (opt-in).
+    pub fn with_telemetry(mut self, hub: Arc<crate::telemetry::TelemetryHub>) -> Self {
+        self.telemetry = hub;
+        self
     }
 
     fn capture_workspace(dir_path: &Path) -> HashMap<String, String> {
@@ -173,8 +219,15 @@ impl WasmtimeSandbox {
             vfs_tarball,
             None,
             None,
-            self.neural_engine.clone(),
             req.call_depth,
+            self.voucher_manager.clone(),
+            self.neural_engine.clone(),
+            self.oracle.clone(),
+            self.model_proxy.clone(),
+            self.telemetry.clone(),
+            self.quota_manager.clone(),
+            self.gateway.clone(),
+            self.market_handle.clone(),
         )
         .await
     }
@@ -189,8 +242,15 @@ impl WasmtimeSandbox {
         vfs_to_restore: Option<&[u8]>,
         vector_to_restore: Option<&[u8]>,
         inference_to_restore: Option<&[u8]>,
-        neural_engine: Arc<dyn crate::inference::NeuralEngine>,
         call_depth: u32,
+        _voucher_manager: Arc<crate::economy::VoucherManager>,
+        neural_engine: Arc<dyn crate::inference::NeuralEngine>,
+        oracle: Arc<crate::oracle::MeshOracle>,
+        model_proxy: Arc<crate::model_proxy::ModelProxy>,
+        telemetry: Arc<crate::telemetry::TelemetryHub>,
+        quota_manager: Arc<crate::fortress::QuotaManager>,
+        gateway: Arc<crate::gateway::SovereignGateway>,
+        market_handle: Arc<crate::market::HiveMarket>,
     ) -> Result<(TetExecutionResult, SnapshotPayload), TetError> {
         if call_depth > 5 {
             return Err(TetError::CallStackExhausted);
@@ -199,6 +259,14 @@ impl WasmtimeSandbox {
         let start = Instant::now();
         let tet_id = uuid::Uuid::new_v4().to_string();
 
+        // Phase 16.1: Emit AgentBooted telemetry
+        telemetry.broadcast(crate::telemetry::HiveEvent::AgentBooted {
+            tet_id: tet_id.clone(),
+            alias: req.alias.clone(),
+            fuel_limit: req.allocated_fuel,
+            memory_limit_mb: req.max_memory_mb,
+            timestamp_us: crate::telemetry::now_us(),
+        });
         let temp_dir = tempfile::tempdir()
             .map_err(|e| TetError::VfsError(format!("Failed to create isolated tempdir: {e}")))?;
 
@@ -244,6 +312,35 @@ impl WasmtimeSandbox {
             )
             .map_err(|e| TetError::EngineError(format!("VFS mapping failed: {e}")))?;
 
+        // Phase 17.1: Derive tenant-namespaced Oracle cache dir
+        let author_pubkey = req
+            .manifest
+            .as_ref()
+            .and_then(|m| m.metadata.author_pubkey.as_deref())
+            .unwrap_or("UNKNOWN");
+        let tenant_id = crate::fortress::TenantNamespace::tenant_id(Some(author_pubkey));
+        let max_egress_bytes = req
+            .manifest
+            .as_ref()
+            .map(|m| m.constraints.max_egress_bytes)
+            .unwrap_or(1_000_000);
+
+        let oracle_cache_dir = crate::fortress::TenantNamespace::derive_cache_dir(
+            temp_dir.path(),
+            Some(author_pubkey),
+        );
+        fs::create_dir_all(&oracle_cache_dir)
+            .map_err(|e| TetError::VfsError(format!("Oracle cache setup failed: {e}")))?;
+
+        wasi_builder
+            .preopened_dir(
+                &oracle_cache_dir,
+                "/vfs/oracle_cache",
+                DirPerms::all(),
+                FilePerms::all(),
+            )
+            .map_err(|e| TetError::EngineError(format!("VFS Oracle Cache mapping failed: {e}")))?;
+
         let wasi_p1_ctx = wasi_builder.build_p1();
 
         let limits = StoreLimitsBuilder::new()
@@ -278,27 +375,48 @@ impl WasmtimeSandbox {
             mesh: mesh.clone(),
             call_stack_depth: call_depth,
             fuel_to_burn_from_parent: 0,
-            manifest: req.manifest.clone().unwrap_or_else(|| crate::models::manifest::AgentManifest {
-                metadata: crate::models::manifest::Metadata {
-                    name: req.alias.clone().unwrap_or_default(),
-                    version: "0.0.0".to_string(),
-                    author_pubkey: Some("UNKNOWN".to_string()),
-                },
-                constraints: crate::models::manifest::ResourceConstraints {
-                    max_memory_pages: 1024,
-                    fuel_limit: 1_000_000,
-                },
-                permissions: crate::models::manifest::CapabilityPolicy {
-                    can_egress: vec![],
-                    can_persist: false,
-                    can_teleport: false,
-                },
+            manifest: req.manifest.clone().unwrap_or_else(|| {
+                crate::models::manifest::AgentManifest {
+                    metadata: crate::models::manifest::Metadata {
+                        name: req.alias.clone().unwrap_or_default(),
+                        version: "0.0.0".to_string(),
+                        author_pubkey: Some("UNKNOWN".to_string()),
+                    },
+                    constraints: crate::models::manifest::ResourceConstraints {
+                        max_memory_pages: 1024,
+                        fuel_limit: 1_000_000,
+                        max_egress_bytes: 1_000_000,
+                    },
+                    permissions: crate::models::manifest::CapabilityPolicy {
+                        can_egress: vec![],
+                        can_persist: false,
+                        can_teleport: false,
+                        is_genesis_factory: false,
+                        can_fork: false,
+                    },
+                }
             }),
             migration_requested: false,
             migration_target: None,
-            egress_policy: req.egress_policy.clone(),
+            egress_policy: req.manifest.as_ref().map(|m| crate::oracle::EgressPolicy {
+                allowed_domains: m.permissions.can_egress.clone(),
+                max_daily_bytes: 1_000_000,
+                require_https: false,
+            }),
             vector_vfs: Arc::new(vector_vfs),
             inference_engine: neural_engine.clone(),
+            oracle: oracle.clone(),
+            oracle_cache_dir,
+            model_proxy: model_proxy.clone(),
+            telemetry: telemetry.clone(),
+            // Phase 17.1: Multi-Tenant Fortress
+            tet_id: tet_id.clone(),
+            tenant_id: tenant_id.clone(),
+            author_pubkey: author_pubkey.to_string(),
+            quota_manager: quota_manager.clone(),
+            max_egress_bytes,
+            gateway: gateway.clone(),
+            market_handle: market_handle.clone(),
         };
 
         let mut store = Store::new(engine, state);
@@ -321,10 +439,10 @@ impl WasmtimeSandbox {
                         Some(wasmtime::Extern::Memory(m)) => m,
                         _ => return Err(wasmtime::Error::msg("No memory exported")),
                     };
-                    
+
                     let mem_slice = validate_range(&memory, &caller, target_ptr, target_len)?;
                     let target_node = String::from_utf8_lossy(mem_slice).to_string();
-                    
+
                     caller.data_mut().migration_requested = true;
                     caller.data_mut().migration_target = Some(target_node);
                     let res: wasmtime::Result<()> = Err(wasmtime::Error::msg("MIGRATION_REQUESTED"));
@@ -332,6 +450,55 @@ impl WasmtimeSandbox {
                 })
             }
         ).map_err(|e| TetError::EngineError(format!("Linking request_migration failed: {e:#}")))?;
+
+        // Phase 25.1: Autonomous Pricing Arbitration
+        linker.func_wrap_async(
+            "trytet",
+            "seek_equilibrium",
+            |mut caller: Caller<'_, TetState>, (): ()| -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let market = caller.data().market_handle.clone();
+                    let current_node = caller.data().tet_id.clone();
+
+                    if let Some(best_bid) = market.find_best_arbitrage(&current_node) {
+                        caller.data_mut().migration_requested = true;
+                        caller.data_mut().migration_target = Some(best_bid.node_id);
+                        return Ok(1);
+                    }
+                    Ok(0)
+                })
+            }
+        ).map_err(|e| TetError::EngineError(format!("Linking seek_equilibrium failed: {e:#}")))?;
+
+        // Phase 18.1: Sovereign Gateway Listener
+        linker
+            .func_wrap(
+                "trytet",
+                "listen",
+                |mut caller: Caller<'_, TetState>,
+                 path_ptr: i32,
+                 path_len: i32,
+                 handler_ptr: i32,
+                 handler_len: i32|
+                 -> wasmtime::Result<i32> {
+                    let memory = match caller.get_export("memory") {
+                        Some(wasmtime::Extern::Memory(m)) => m,
+                        _ => return Err(wasmtime::Error::msg("No memory exported")),
+                    };
+
+                    let path_slice = validate_range(&memory, &caller, path_ptr, path_len)?;
+                    let path = String::from_utf8_lossy(path_slice).to_string();
+
+                    let handler_slice = validate_range(&memory, &caller, handler_ptr, handler_len)?;
+                    let handler = String::from_utf8_lossy(handler_slice).to_string();
+
+                    let alias = caller.data().manifest.metadata.name.clone();
+                    caller.data().gateway.register_route(alias, path, handler);
+
+                    Ok(0)
+                },
+            )
+            .map_err(|e| TetError::EngineError(format!("Linking listen failed: {e:#}")))?;
 
         let source_alias = req
             .alias
@@ -383,6 +550,7 @@ impl WasmtimeSandbox {
                             payload: payload_bytes,
                             fuel_to_transfer,
                             current_depth: caller.data().call_stack_depth,
+                            target_function: None,
                         };
 
                         // Phase 7: Topology Observability Hook (enter)
@@ -487,16 +655,10 @@ impl WasmtimeSandbox {
                 TetError::EngineError(format!("Failed to register trytet::invoke: {e:#}"))
             })?;
 
-        let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .unwrap_or_default();
-
         linker.func_wrap_async(
             "trytet",
             "fetch",
             move |mut caller: Caller<'_, TetState>, (url_ptr, url_len, method_ptr, method_len, body_ptr, body_len, out_ptr, out_len_ptr): (i32, i32, i32, i32, i32, i32, i32, i32)| -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
-                let http_client = http_client.clone();
                 Box::new(async move {
                     let memory = match caller.get_export("memory") {
                         Some(wasmtime::Extern::Memory(m)) => m,
@@ -507,15 +669,11 @@ impl WasmtimeSandbox {
                     let req_method_str = String::from_utf8_lossy(validate_range(&memory, &caller, method_ptr, method_len)?).to_string();
                     let req_body = validate_range(&memory, &caller, body_ptr, body_len)?.to_vec();
 
-
-                    // Security/Filtering
                     let policy = caller.data().egress_policy.clone();
                     if let Some(p) = policy {
                         if p.require_https && !target_url.starts_with("https://") {
                             return Err(wasmtime::Error::msg("Security Violation: HTTPS strictly required"));
                         }
-                        
-                        // Parse host
                         if let Ok(parsed_url) = reqwest::Url::parse(&target_url) {
                             if let Some(host) = parsed_url.host_str() {
                                 if !p.allowed_domains.contains(&host.to_string()) {
@@ -531,46 +689,75 @@ impl WasmtimeSandbox {
                         return Err(wasmtime::Error::msg("Security Violation: No EgressPolicy assigned to this Sandbox Execution"));
                     }
 
-                    let method = match req_method_str.as_str() {
-                        "POST" => reqwest::Method::POST,
-                        "PUT" => reqwest::Method::PUT,
-                        "DELETE" => reqwest::Method::DELETE,
-                        _ => reqwest::Method::GET,
-                    };
+                    // Phase 15.1: Deterministic Abstract Metering (Pre-flight cost)
+                    let c_base = 50_000_u64;
+                    let c_unit = 10_u64;
+                    let req_size = target_url.len() as u64 + req_method_str.len() as u64 + req_body.len() as u64;
+                    let req_fuel = c_base + (req_size / 1024) * c_unit;
 
-                    // Execute HTTP Request
-                    let response = http_client.request(method, &target_url)
-                        .body(req_body.clone())
-                        .send()
-                        .await;
-
-                    let mut returned_bytes = Vec::new();
-                    let success_code = match response {
-                        Ok(res) => {
-                            if let Ok(bytes) = res.bytes().await {
-                                returned_bytes = bytes.to_vec();
-                                0_i32
-                            } else {
-                                6_i32 // Body read failed
-                            }
-                        }
-                        Err(_) => {
-                            6_i32 // Legacy network error
-                        }
-                    };
-
-                    let total_network_bytes = req_body.len() as u64 + returned_bytes.len() as u64;
-                    let fuel_tax = total_network_bytes * 10;
-                    
                     if let Ok(current_fuel) = caller.get_fuel() {
-                        if current_fuel >= fuel_tax {
-                            let _ = caller.set_fuel(current_fuel - fuel_tax);
+                        if current_fuel >= req_fuel {
+                            let _ = caller.set_fuel(current_fuel - req_fuel);
                         } else {
-                            let _ = caller.set_fuel(0); // Trap out-of-fuel quickly
+                            let _ = caller.set_fuel(0);
+                            return Ok(6); // out of fuel
                         }
                     }
 
-                    // Write response to linear memory if success
+                    let oracle_req = crate::oracle::OracleRequest {
+                        url: target_url.clone(),
+                        method: req_method_str.clone(),
+                        body: req_body.clone(),
+                    };
+
+                    let oracle = caller.data().oracle.clone();
+                    let cache_dir = caller.data().oracle_cache_dir.clone();
+
+                    // Phase 17.1: Pre-flight Egress Quota Check
+                    let quota_mgr = caller.data().quota_manager.clone();
+                    let tenant_id = caller.data().tenant_id.clone();
+                    let max_egress = caller.data().max_egress_bytes;
+                    let header_overhead = crate::fortress::SovereignHeaders::header_overhead(
+                        &caller.data().tet_id,
+                        &caller.data().author_pubkey,
+                    );
+                    let pre_flight_bytes = req_size + header_overhead;
+
+                    if quota_mgr.check_and_record(&tenant_id, pre_flight_bytes, max_egress).is_err() {
+                        return Ok(8); // EgressQuotaExceeded
+                    }
+
+                    // Phase 17.1: Construct Sovereign Identity Headers
+                    let sovereign_headers = crate::fortress::SovereignHeaders::inject(
+                        &caller.data().tet_id,
+                        &caller.data().author_pubkey,
+                        &oracle.wallet,
+                        &req_method_str,
+                        &target_url,
+                        &req_body,
+                    );
+
+                    let (status_code, returned_bytes) = match oracle.resolve_with_headers(oracle_req, &cache_dir, sovereign_headers).await {
+                        Ok((s, b)) => (s, b),
+                        Err(_) => (500, vec![]),
+                    };
+
+                    // Phase 17.1: Post-flight Egress Quota (response bytes)
+                    let _ = quota_mgr.check_and_record(&tenant_id, returned_bytes.len() as u64, max_egress);
+
+                    // Phase 15.1: Response Fuel cost (post-flight cost)
+                    let res_fuel = (returned_bytes.len() as u64 / 1024) * c_unit;
+                    if let Ok(current_fuel) = caller.get_fuel() {
+                        if current_fuel >= res_fuel {
+                            let _ = caller.set_fuel(current_fuel - res_fuel);
+                        } else {
+                            let _ = caller.set_fuel(0);
+                            return Ok(6); // out of fuel
+                        }
+                    }
+
+                    let success_code = if (200..400).contains(&status_code) { 0_i32 } else { 6_i32 };
+
                     if success_code == 0 {
                         let response_len = returned_bytes.len() as i32;
                         let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
@@ -593,7 +780,7 @@ impl WasmtimeSandbox {
                             }
                         }
                     }
-                    
+
                     Ok(success_code)
                 })
             }
@@ -618,13 +805,13 @@ impl WasmtimeSandbox {
                     if true {
                         if let Ok(collection_name) = String::from_utf8(cb) {
                             if let Ok(record) = serde_json::from_slice::<crate::memory::VectorRecord>(&rb) {
-                                
+
                                 // Metric Fuel Adjusted Indexing Cost
                                 let dim = record.vector.len() as u64;
                                 let base_cost = 500;
                                 let multiplier = 5;
                                 let fuel_cost = base_cost + (dim * multiplier);
-                                
+
                                 if let Ok(current_fuel) = caller.get_fuel() {
                                     if current_fuel >= fuel_cost {
                                         let _ = caller.set_fuel(current_fuel - fuel_cost);
@@ -633,7 +820,7 @@ impl WasmtimeSandbox {
                                         return Ok(5);
                                     }
                                 }
-                                
+
                                 let vfs = caller.data().vector_vfs.clone();
                                 vfs.remember(&collection_name, record);
                                 return Ok(0);
@@ -661,10 +848,10 @@ impl WasmtimeSandbox {
 
                     if true {
                         if let Ok(query) = serde_json::from_slice::<crate::memory::SearchQuery>(&qb) {
-                            
+
                             let dim = query.query_vector.len() as u64;
                             let search_cost = 100 + (dim * 2);
-                            
+
                             if let Ok(current_fuel) = caller.get_fuel() {
                                 if current_fuel >= search_cost {
                                     let _ = caller.set_fuel(current_fuel - search_cost);
@@ -673,10 +860,10 @@ impl WasmtimeSandbox {
                                     return Ok(5);
                                 }
                             }
-                            
+
                             let vfs = caller.data().vector_vfs.clone();
                             let results = vfs.recall(&query);
-                            
+
                             if let Ok(response_json) = serde_json::to_vec(&results) {
                                 let response_len = response_json.len() as i32;
                                 let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
@@ -689,16 +876,16 @@ impl WasmtimeSandbox {
                                     if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
                                         m.copy_from_slice(&required_size);
                                     }
-                                    return Ok(2); 
+                                    return Ok(2);
                                 } else {
                                     let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
                                     m.copy_from_slice(&response_json);
-                                    
+
                                     let written_size = response_len.to_le_bytes();
                                     if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
                                         m.copy_from_slice(&written_size);
                                     }
-                                    return Ok(0); 
+                                    return Ok(0);
                                 }
                             }
                         }
@@ -749,7 +936,7 @@ impl WasmtimeSandbox {
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::model_load: {e:#}")))?;
 
-        // Phase 10: The Sovereign Inference — model_predict
+        // Phase 15.2: The Sovereign Inference — model_predict (Oracle-Mediated)
         linker.func_wrap_async(
             "trytet",
             "model_predict",
@@ -764,58 +951,381 @@ impl WasmtimeSandbox {
 
                     let rb = validate_range(&memory, &caller, request_ptr, request_len)?.to_vec();
 
-                    if true {
-                        if let Ok(request) = serde_json::from_slice::<crate::inference::InferenceRequest>(&rb) {
-                            let engine = caller.data().inference_engine.clone();
-                            let current_fuel = caller.get_fuel().unwrap_or(0);
+                    let request = match serde_json::from_slice::<crate::inference::InferenceRequest>(&rb) {
+                        Ok(r) => r,
+                        Err(_) => return Ok(3), // Bad input
+                    };
 
-                            match engine.predict(&request, current_fuel).await {
-                                Ok(response) => {
-                                    // Burn fuel proportional to tokens
-                                    let fuel_cost = response.fuel_burned;
-                                    if let Ok(fuel) = caller.get_fuel() {
-                                        if fuel >= fuel_cost {
-                                            let _ = caller.set_fuel(fuel - fuel_cost);
-                                        } else {
-                                            let _ = caller.set_fuel(0);
-                                            // Fallthrough to write OutOfFuel trap_reason to Wasm memory
-                                        }
-                                    }
+                    // Phase 15.2: Context Overflow Check via ContextRouter
+                    let model_proxy = caller.data().model_proxy.clone();
+                    let context_limit = model_proxy.provider.context_limit(&request.model_alias);
 
-                                    if let Ok(response_json) = serde_json::to_vec(&response) {
-                                        let response_len = response_json.len() as i32;
-                                        let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
+                    // Estimate prompt tokens using 1.15x safety factor
+                    let estimated_prompt_tokens = std::cmp::max(1, request.prompt.len().div_ceil(4));
+                    let t_total = (estimated_prompt_tokens as f64 * 1.15).ceil() as usize;
 
-                                        let mut len_buf = [0u8; 4];
-                                        len_buf.copy_from_slice(len_slice);
-                                        let guest_buffer_size = i32::from_le_bytes(len_buf);
-
-                                        if response_len > guest_buffer_size {
-                                            let required_size = response_len.to_le_bytes();
-                                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
-                                                m.copy_from_slice(&required_size);
-                                            }
-                                            return Ok(2); 
-                                        } else {
-                                            let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
-                                            m.copy_from_slice(&response_json);
-
-                                            let written_size = response_len.to_le_bytes();
-                                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
-                                                m.copy_from_slice(&written_size);
-                                            }
-                                            return Ok(0); 
-                                        }
-                                    }
-                                }
-                                Err(_) => return Ok(4), // Inference failed
-                            }
-                        }
+                    if t_total > context_limit {
+                        // Context overflow: return error code 7 to guest
+                        return Ok(7);
                     }
-                    Ok(3) // Bad input
+
+                    // Phase 15.2: Build InferenceProxyRequest for Oracle-mediated flow
+                    let proxy_req = crate::model_proxy::InferenceProxyRequest {
+                        prompt: request.prompt.clone(),
+                        model_id: request.model_alias.clone(),
+                        temperature: request.temperature,
+                        max_tokens: request.max_tokens,
+                    };
+
+                    let cache_dir = caller.data().oracle_cache_dir.clone();
+                    let telemetry = caller.data().telemetry.clone();
+
+                    // Phase 16.1: Emit InferenceStarted
+                    telemetry.broadcast(crate::telemetry::HiveEvent::InferenceStarted {
+                        tet_id: "guest".to_string(),
+                        model_id: request.model_alias.clone(),
+                        prompt_tokens_est: estimated_prompt_tokens as u32,
+                        timestamp_us: crate::telemetry::now_us(),
+                    });
+
+                    // Phase 15.2: Resolve through ModelProxy (Oracle cache → Provider → Sign)
+                    match model_proxy.predict(proxy_req, &cache_dir).await {
+                        Ok(proxy_resp) => {
+                            // Phase 15.2: Deterministic Token Billing
+                            // Fuel = (InputTokens + OutputTokens) × C_TOKEN_WEIGHT + C_BASE_OVERHEAD
+                            let fuel_cost = crate::model_proxy::ModelProxy::calculate_fuel(
+                                proxy_resp.input_tokens,
+                                proxy_resp.output_tokens,
+                            );
+
+                            if let Ok(current_fuel) = caller.get_fuel() {
+                                if current_fuel >= fuel_cost {
+                                    let _ = caller.set_fuel(current_fuel - fuel_cost);
+                                } else {
+                                    let _ = caller.set_fuel(0);
+                                    return Ok(6); // Out of fuel
+                                }
+                            }
+
+                            // Serialize the proxy response to guest memory
+                            if let Ok(response_json) = serde_json::to_vec(&proxy_resp) {
+                                let response_len = response_json.len() as i32;
+                                let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
+
+                                let mut len_buf = [0u8; 4];
+                                len_buf.copy_from_slice(len_slice);
+                                let guest_buffer_size = i32::from_le_bytes(len_buf);
+
+                                if response_len > guest_buffer_size {
+                                    let required_size = response_len.to_le_bytes();
+                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                        m.copy_from_slice(&required_size);
+                                    }
+                                    return Ok(2); // Buffer too small
+                                } else {
+                                    let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                                    m.copy_from_slice(&response_json);
+
+                                    let written_size = response_len.to_le_bytes();
+                                    if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                        m.copy_from_slice(&written_size);
+                                    }
+                                    return Ok(0); // Success
+                                }
+                            }
+
+                            // Phase 16.1: Emit InferenceCompleted
+                            telemetry.broadcast(crate::telemetry::HiveEvent::InferenceCompleted {
+                                tet_id: "guest".to_string(),
+                                model_id: request.model_alias.clone(),
+                                input_tokens: proxy_resp.input_tokens,
+                                output_tokens: proxy_resp.output_tokens,
+                                fuel_cost,
+                                cached: proxy_resp.cached,
+                                timestamp_us: crate::telemetry::now_us(),
+                            });
+
+                            Ok(4) // Serialization failure
+                        }
+                        Err(_) => Ok(4), // Inference provider error
+                    }
                 })
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::model_predict: {e:#}")))?;
+
+        linker.func_wrap_async(
+            "trytet",
+            "fork",
+            |mut caller: Caller<'_, TetState>,
+             (fuel_to_give, node_ptr, node_len): (i64, i32, i32)|
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let fuel_to_give = fuel_to_give as u64;
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(m) => m,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
+                    };
+
+                    let target_node = if node_len > 0 {
+                        let rb = validate_range(&memory, &caller, node_ptr, node_len)?.to_vec();
+                        Some(String::from_utf8_lossy(&rb).to_string())
+                    } else {
+                        None
+                    };
+
+                    let snapshot_bytes = memory.data(&caller).to_vec();
+
+                    let manifest = caller.data().manifest.clone();
+                    let alias_name = manifest.metadata.name.clone();
+                    let max_memory_mb = manifest.constraints.max_memory_pages * 64 / 1024;
+                    let egress_policy = caller.data().egress_policy.clone();
+                    let mesh = caller.data().mesh.clone();
+
+                    let max_fuel = caller.get_fuel().unwrap_or(0);
+                    if fuel_to_give > max_fuel {
+                        return Ok(5); // OUT OF FUEL
+                    }
+                    let _ = caller.set_fuel(max_fuel - fuel_to_give);
+
+                    let req = crate::models::TetExecutionRequest {
+                        payload: Some(snapshot_bytes),
+                        alias: Some(alias_name),
+                        allocated_fuel: fuel_to_give,
+                        max_memory_mb,
+                        env: std::collections::HashMap::new(),
+                        injected_files: std::collections::HashMap::new(),
+                        parent_snapshot_id: None,
+                        call_depth: 0,
+                        voucher: None,
+                        manifest: Some(manifest),
+                        egress_policy,
+                        target_function: None,
+                    };
+
+                    if let Some(_tn) = target_node {
+                        // Normally we would route to the target node,
+                        // but setting target node directly on req isn't natively supported yet.
+                        // For MVP, we treat local requests similarly to networked ones via MeshWorker
+                    }
+
+                    let _ = mesh.send_fork(req).await;
+
+                    Ok(0) // Return Child TetID success
+                })
+            },
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::fork: {e:#}")))?;
+
+        // Phase 22.1: The Autonomous Economy
+        linker.func_wrap_async(
+            "trytet",
+            "pay",
+            |mut caller: Caller<'_, TetState>,
+             (target_ptr, target_len, amount): (i32, i32, i64)|
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let amount = amount as u64;
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(m) => m,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
+                    };
+
+                    let target_alias = {
+                        let rb = validate_range(&memory, &caller, target_ptr, target_len)?.to_vec();
+                        String::from_utf8_lossy(&rb).to_string()
+                    };
+
+                    let max_fuel = caller.get_fuel().unwrap_or(0);
+                    if amount > max_fuel {
+                        return Ok(5); // OUT OF FUEL Error Code
+                    }
+                    // Extract fuel locally before issuing transaction!
+                    let _ = caller.set_fuel(max_fuel - amount);
+
+                    let manifest = caller.data().manifest.clone();
+                    let source_alias = manifest.metadata.name.clone();
+
+                    let mesh = caller.data().mesh.clone();
+                    // In a production system, we call try_p2p_fuel_transfer logic via MeshWorker or Hive command
+                    // We broadcast this payment intent!
+
+                    // Host-isolated Wallet Deterministic generation for the sender!
+                    use sha2::Digest;
+                    let mut hasher = sha2::Sha256::new();
+                    hasher.update(source_alias.as_bytes());
+                    let mut seed_a = [0u8; 32];
+                    seed_a.copy_from_slice(&hasher.finalize()[..]);
+                    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed_a);
+                    let pub_a = signing_key.verifying_key().to_bytes().to_vec();
+
+                    let mut hasher2 = sha2::Sha256::new();
+                    hasher2.update(target_alias.as_bytes());
+                    let mut seed_b = [0u8; 32];
+                    seed_b.copy_from_slice(&hasher2.finalize()[..]);
+                    let pub_b = ed25519_dalek::SigningKey::from_bytes(&seed_b).verifying_key().to_bytes().to_vec();
+
+                    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+                    let mut signed_data = Vec::new();
+                    signed_data.extend_from_slice(&pub_a);
+                    signed_data.extend_from_slice(&pub_b);
+                    signed_data.extend_from_slice(&amount.to_be_bytes());
+                    signed_data.extend_from_slice(&nonce.to_be_bytes());
+
+                    use ed25519_dalek::Signer;
+                    let sig = signing_key.sign(&signed_data).to_bytes().to_vec();
+
+                    let tx = crate::economy::registry::FuelTransaction {
+                        from: pub_a,
+                        to: pub_b,
+                        amount,
+                        nonce,
+                        signature: sig,
+                    };
+
+                    let pkt = crate::hive::HiveCommand::TransferCredit(tx);
+                    // Broadcast or Local processing:
+                    // For test contexts, we directly mock or process via our gateway/network if available.
+                    let _ = mesh.send_economy_packet(pkt).await;
+
+                    Ok(0) // Success
+                })
+            },
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::pay: {e:#}")))?;
+
+        linker.func_wrap_async(
+            "trytet",
+            "bill",
+            |mut caller: Caller<'_, TetState>,
+             (source_ptr, source_len, amount): (i32, i32, i64)|
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let amount = amount as u64;
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(m) => m,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
+                    };
+
+                    let source_alias = {
+                        let rb = validate_range(&memory, &caller, source_ptr, source_len)?.to_vec();
+                        String::from_utf8_lossy(&rb).to_string()
+                    };
+
+                    let manifest = caller.data().manifest.clone();
+                    let target_alias = manifest.metadata.name.clone();
+                    let mesh = caller.data().mesh.clone();
+
+                    let pkt = crate::hive::HiveCommand::BillRequest {
+                        source_alias,
+                        target_alias,
+                        amount,
+                    };
+
+                    let _ = mesh.send_economy_packet(pkt).await;
+                    Ok(0)
+                })
+            },
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::bill: {e:#}")))?;
+
+        // Phase 23.1: The External Settlement Bridge
+        linker.func_wrap_async(
+            "trytet",
+            "withdraw",
+            |mut caller: Caller<'_, TetState>,
+             (amount, addr_ptr, addr_len): (i64, i32, i32)|
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let amount = amount as u64;
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(m) => m,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
+                    };
+
+                    let target_address = {
+                        let rb = validate_range(&memory, &caller, addr_ptr, addr_len)?.to_vec();
+                        String::from_utf8_lossy(&rb).to_string()
+                    };
+
+                    // 1. Atomic Burn
+                    let max_fuel = caller.get_fuel().unwrap_or(0);
+                    if amount > max_fuel {
+                        return Ok(5); // OUT OF FUEL
+                    }
+                    let _ = caller.set_fuel(max_fuel - amount);
+
+                    let manifest = caller.data().manifest.clone();
+                    let source_alias = manifest.metadata.name.clone();
+
+                    let mesh = caller.data().mesh.clone();
+
+                    // Generate host-isolated signature for BridgeIntent
+                    use sha2::Digest;
+                    let mut hasher = sha2::Sha256::new();
+                    hasher.update(source_alias.as_bytes());
+                    let mut seed = [0u8; 32];
+                    seed.copy_from_slice(&hasher.finalize()[..]);
+                    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+
+                    let mut signed_data = Vec::new();
+                    signed_data.extend_from_slice(&amount.to_be_bytes());
+                    signed_data.extend_from_slice(b"ETH"); // External Asset mapping statically for now
+                    signed_data.extend_from_slice(target_address.as_bytes());
+
+                    use ed25519_dalek::Signer;
+                    let sig = signing_key.sign(&signed_data).to_bytes().to_vec();
+
+                    let intent = crate::economy::bridge::BridgeIntent {
+                        internal_fuel: amount,
+                        external_asset: "ETH".to_string(),
+                        target_address,
+                        agent_signature: sig,
+                    };
+
+                    let pkt = crate::hive::HiveCommand::WithdrawalPending(intent);
+
+                    // 2-Phase Commit logic: if broadcasting fails, we rollback the Wasm fuel!
+                    if mesh.send_economy_packet(pkt).await.is_err() {
+                        let _ = caller.set_fuel(max_fuel); // Rollback
+                        return Ok(6); // NETWORK DISCONNECT
+                    }
+
+                    Ok(0) // Success
+                })
+            },
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::withdraw: {e:#}")))?;
+
+        // Phase 24.1: Genesis Factory Lifecycle Hooks
+        linker.func_wrap_async(
+            "trytet",
+            "reclaim",
+            |mut caller: Caller<'_, TetState>,
+             (child_ptr, child_len): (i32, i32)|
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let permissions = caller.data().manifest.permissions.clone();
+                    if !permissions.is_genesis_factory {
+                        return Ok(7); // ACCESS_DENIED
+                    }
+
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(m) => m,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
+                    };
+
+                    let child_id = {
+                        let rb = validate_range(&memory, &caller, child_ptr, child_len)?.to_vec();
+                        String::from_utf8_lossy(&rb).to_string()
+                    };
+
+                    let mesh = caller.data().mesh.clone();
+
+                    if mesh.send_reclaim(child_id).await.is_err() {
+                        return Ok(6); // DISCONNECT
+                    }
+
+                    Ok(0) // Success gracefully initiated!
+                })
+            },
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::reclaim: {e:#}")))?;
 
         let instance = linker
             .instantiate_async(&mut store, &module)
@@ -836,9 +1346,19 @@ impl WasmtimeSandbox {
             }
         }
 
-        let run_result = match instance.get_typed_func::<(), ()>(&mut store, "_start") {
-            Ok(start_fn) => start_fn.call_async(&mut store, ()).await,
-            Err(_) => Ok(()), // empty default export
+        let run_result = if let Some(ref func_name) = req.target_function {
+            match instance.get_typed_func::<(), ()>(&mut store, func_name) {
+                Ok(start_fn) => start_fn.call_async(&mut store, ()).await,
+                Err(_) => Err(wasmtime::Error::msg(format!(
+                    "Target function '{}' not found or invalid signature",
+                    func_name
+                ))),
+            }
+        } else {
+            match instance.get_typed_func::<(), ()>(&mut store, "_start") {
+                Ok(start_fn) => start_fn.call_async(&mut store, ()).await,
+                Err(_) => Ok(()), // empty default export
+            }
         };
 
         let status = match run_result {
@@ -931,6 +1451,25 @@ impl WasmtimeSandbox {
             mesh.register(alias.clone(), metadata).await;
         }
 
+        // Phase 16.1: Emit AgentCompleted telemetry
+        let status_str = match &result.status {
+            ExecutionStatus::Success => "Success".to_string(),
+            ExecutionStatus::OutOfFuel => "OutOfFuel".to_string(),
+            ExecutionStatus::MemoryExceeded => "MemoryExceeded".to_string(),
+            ExecutionStatus::Crash(r) => format!("Crash({})", r.error_type),
+            ExecutionStatus::Migrated => "Migrated".to_string(),
+        };
+        telemetry.broadcast(crate::telemetry::HiveEvent::AgentCompleted {
+            tet_id: tet_id.clone(),
+            alias: req.alias.clone(),
+            status: status_str,
+            fuel_consumed,
+            fuel_limit: req.allocated_fuel,
+            memory_used_kb,
+            duration_us: start.elapsed().as_micros() as u64,
+            timestamp_us: crate::telemetry::now_us(),
+        });
+
         Ok((result, payload))
     }
 }
@@ -1021,31 +1560,46 @@ impl TetSandbox for WasmtimeSandbox {
             vfs_to_restore,
             vec_to_restore,
             inf_to_restore,
-            self.neural_engine.clone(),
             req.call_depth,
+            self.voucher_manager.clone(),
+            self.neural_engine.clone(),
+            self.oracle.clone(),
+            self.model_proxy.clone(),
+            self.telemetry.clone(),
+            self.quota_manager.clone(),
+            self.gateway.clone(),
+            self.market_handle.clone(),
         )
         .await?;
 
         // Store active memory and auto-snapshot it
-        self.active_memories
-            .write()
-            .await
-            .insert(result.tet_id.clone(), (snapshot_payload.clone(), req.manifest.clone().unwrap_or_else(|| crate::models::manifest::AgentManifest {
-                metadata: crate::models::manifest::Metadata {
-                    name: req.alias.clone().unwrap_or_default(),
-                    version: "0.0.0".to_string(),
-                    author_pubkey: Some("UNKNOWN".to_string()),
-                },
-                constraints: crate::models::manifest::ResourceConstraints {
-                    max_memory_pages: 1024,
-                    fuel_limit: 1_000_000,
-                },
-                permissions: crate::models::manifest::CapabilityPolicy {
-                    can_egress: vec![],
-                    can_persist: false,
-                    can_teleport: false,
-                },
-            })));
+        self.active_memories.write().await.insert(
+            result.tet_id.clone(),
+            (
+                snapshot_payload.clone(),
+                req.manifest
+                    .clone()
+                    .unwrap_or_else(|| crate::models::manifest::AgentManifest {
+                        metadata: crate::models::manifest::Metadata {
+                            name: req.alias.clone().unwrap_or_default(),
+                            version: "0.0.0".to_string(),
+                            author_pubkey: Some("UNKNOWN".to_string()),
+                        },
+                        constraints: crate::models::manifest::ResourceConstraints {
+                            max_memory_pages: 1024,
+                            fuel_limit: 1_000_000,
+                            max_egress_bytes: 1_000_000,
+                        },
+                        permissions: crate::models::manifest::CapabilityPolicy {
+                            can_egress: vec![],
+                            can_persist: false,
+                            can_teleport: false,
+                            is_genesis_factory: false,
+                            can_fork: false,
+                        },
+                    }),
+            ),
+        );
 
         let snapshot_id = uuid::Uuid::new_v4().to_string();
         self.snapshots
@@ -1093,7 +1647,10 @@ impl TetSandbox for WasmtimeSandbox {
         Ok(snapshot_id)
     }
 
-    async fn export_manifest(&self, id_or_alias: &str) -> Result<crate::models::manifest::AgentManifest, TetError> {
+    async fn export_manifest(
+        &self,
+        id_or_alias: &str,
+    ) -> Result<crate::models::manifest::AgentManifest, TetError> {
         let active = self.active_memories.read().await;
         let mut tuple_opt = active.get(id_or_alias).cloned();
         if tuple_opt.is_none() {
@@ -1101,7 +1658,8 @@ impl TetSandbox for WasmtimeSandbox {
                 tuple_opt = active.get(&target_meta.tet_id).cloned();
             }
         }
-        let (_, manifest) = tuple_opt.ok_or_else(|| TetError::SnapshotNotFound(id_or_alias.to_string()))?;
+        let (_, manifest) =
+            tuple_opt.ok_or_else(|| TetError::SnapshotNotFound(id_or_alias.to_string()))?;
         Ok(manifest)
     }
 
@@ -1138,7 +1696,8 @@ impl TetSandbox for WasmtimeSandbox {
             }
         }
 
-        let (payload, _) = payload_opt.ok_or_else(|| TetError::SnapshotNotFound(alias.to_string()))?;
+        let (payload, _) =
+            payload_opt.ok_or_else(|| TetError::SnapshotNotFound(alias.to_string()))?;
         drop(active);
 
         if payload.vector_idx.is_empty() {
@@ -1195,6 +1754,19 @@ impl TetSandbox for WasmtimeSandbox {
 
     async fn deregister(&self, alias: &str) {
         self.mesh.deregister(alias).await;
+    }
+
+    async fn publish_dht_route(
+        &self,
+        alias: &str,
+        target_ip: &str,
+        signature: &str,
+    ) -> Result<(), String> {
+        self.gateway
+            .dht
+            .update_route(alias, target_ip, signature)
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 

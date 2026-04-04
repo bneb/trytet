@@ -1,45 +1,38 @@
-# Trytet Deployment Guide (Phase 14)
+# Deploying Trytet (Phase 27.1)
 
-This repository serves a true "Polyglot Monolith." It contains the high-performance native Rust Wasm engine (`tet-core`), the browser-native Wasm polyfill bridge (`crates/tet-web`), and the frontend Next.js interactive environment (`playground`).
+This repository holds a "Polyglot Monolith" featuring the high-performance native Rust Wasm engine (`tet-core`), the browser-native Wasm polyfill bridge (`crates/tet-web`), and testing submodules.
 
-## CI/CD Pipeline (GitHub Actions)
-Deployments are fully automated via GitHub Actions (`.github/workflows/deploy.yml`). Pushing to `main` triggers a dual-phase rollout:
-1. **Fly.io Backend**: Deploys the monolithic `tet-core` Engine via standard Docker builders.
-2. **Cloudflare Pages**: Installs Rust/Wasm toolchains, builds the optimized WebAssembly bridge (`.wasm`), statically exports the Next.js target (`/out`), and routes via Wrangler to the edge.
-
-### Required Repository Secrets:
-You must define the following Github Secrets in your repository:
-- `FLY_API_TOKEN`: Used to authenticate builder deployments to Fly.io. Grab via `fly auth token`.
-- `CLOUDFLARE_API_TOKEN`: Your Cloudflare worker/pages deployment token.
-- `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account ID string.
-
-## Manual Deployment Checklists
-
-### 1. Fly.io Monolith (Backend)
-If CI fails or you need manual provisioning:
+## Quickstart Binary Compilation
+To compile the raw binary for production operations, simply run:
 ```bash
-# Authorize
+cargo build --release
+```
+The compiled Gateway and Engine (`tet`) is found at `./target/release/tet`. It is a fully statically sized, zero-dependency executable. 
+
+## Node Topology & Local Environment 
+
+### Environment Variables
+For multi-node cluster settings:
+- `TRYTET_API_URL`: Override the default `http://localhost:3000`.
+- `TRYTET_HIVE_BIND`: Override default port `2026` for secure P2P Gossip RPC.
+- `REGISTRY_PATH`: Wasm storage directory (defaults to `~/.trytet/registry`). 
+
+You can boot secondary testing nodes trivially:
+```bash
+TRYTET_API_URL=http://localhost:3001 TRYTET_HIVE_BIND=0.0.0.0:2027 cargo run --bin tet-core
+```
+
+## Docker and Fly.io
+Deployments to centralized cloud platforms are defined by standard App Configs. Pushing to `main` seamlessly rolls out an update to attached Github Actions. 
+
+```bash
+# Authorize Fly
 fly auth login
-# Optionally provision volume if region-shifting
+# Optionally provision persistent storage
 fly volumes create trytet_data --region sjc --size 1
-# Deploy using standard App Config
+# Deploy using the existing fly.toml
 fly deploy
 ```
 
-### 2. Cloudflare Edge (Frontend WebWorker UI)
-If needing manual frontend proxy deployments:
-```bash
-# 1. Compile Optimized Wasm Bundle First
-cd crates/tet-web
-wasm-pack build --target web --release --out-dir ../../playground/pkg
-
-# 2. Build the Static Next.js Target
-cd ../../playground
-npm install
-npm run build
-
-# 3. Ship to Pages
-npx wrangler pages deploy out --project-name trytet-web
-```
-
-Important: The Next.js static asset compiler implicitly expects `trytet/playground/pkg/` to contain valid `.wasm` target blobs. Never run the `npm build` command without re-generating `wasm-pack` first if `tet-core` code has mutated.
+> [!TIP]
+> Make sure `fly.toml` forwards external ports `80`/`443` internally to `3000` (API & Console) and reserves `2026` for peer-to-peer data ingestion if you run a multi-region deployment.

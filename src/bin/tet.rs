@@ -20,10 +20,13 @@ fn get_api_url() -> String {
 }
 
 #[derive(Parser)]
-#[command(name = "tet", about = "The Agentic Trytet CLI", version)]
+#[command(name = "tet", about = "The Sovereign Hive Gateway", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    /// Output raw JSON for piping into jq or automation scripts
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -53,14 +56,14 @@ enum Commands {
     /// Captured atomic state of a hibernating Tet into a CAS .tet artifact
     Snapshot { alias: String, tag: String },
     /// OCI-compliant push of a .tet artifact to a remote registry
-    Push { 
+    Push {
         /// The tag to push (e.g. "my-registry.com/agent:v1")
-        tag: String 
+        tag: String,
     },
     /// OCI-compliant pull of a .tet artifact from a remote registry
-    Pull { 
+    Pull {
         /// The reference to pull (e.g. "my-registry.com/agent:v1")
-        tag: String 
+        tag: String,
     },
     /// Authenticate with a remote OCI registry
     Login {
@@ -108,6 +111,25 @@ enum Commands {
         #[arg(long, default_value = "256")]
         max_tokens: u32,
     },
+    /// List active agents and their operational vitals (Market Multiplier, Thermal Pressure)
+    Ps,
+    /// Transfer fuel credits between agents
+    Pay {
+        /// Source agent alias or pubkey
+        from: String,
+        /// Destination agent alias or pubkey
+        to: String,
+        /// Amount of fuel to transfer
+        amount: u64,
+    },
+    /// Tail the TelemetryHub with human-readable event icons
+    Logs {
+        /// Agent alias to follow
+        #[arg(short = 'f', long = "follow")]
+        alias: Option<String>,
+    },
+    /// Run the Northstar Benchmarking Suite and display performance metrics
+    Metrics,
 }
 
 fn pb_style() -> ProgressStyle {
@@ -154,6 +176,7 @@ async fn run_payload(
         voucher: None,
         manifest: None,
         egress_policy: None,
+        target_function: None,
     };
 
     let res = client
@@ -290,7 +313,7 @@ async fn push(tag: &str) -> Result<()> {
     } else {
         "https://index.docker.io".to_string()
     };
-    
+
     let token = auth.get(&registry_url).cloned();
     let client = tet_core::registry::oci::OciClient::new(registry_url, token);
 
@@ -309,7 +332,10 @@ async fn push(tag: &str) -> Result<()> {
 
     client.push(&artifact, tag).await?;
 
-    pb.finish_with_message(format!("{} Published to Registry via OCI Distribution!", "✔".green()));
+    pb.finish_with_message(format!(
+        "{} Published to Registry via OCI Distribution!",
+        "✔".green()
+    ));
     Ok(())
 }
 
@@ -326,12 +352,16 @@ fn load_auth() -> Result<std::collections::HashMap<String, String>> {
 async fn login(registry: &str, token: &str) -> Result<()> {
     let mut auth = load_auth()?;
     auth.insert(registry.to_string(), token.to_string());
-    
+
     let path = home::home_dir().unwrap().join(".trytet").join("auth.json");
     fs::create_dir_all(path.parent().unwrap())?;
     fs::write(path, serde_json::to_string(&auth)?)?;
-    
-    println!("{} Scoped authentication token persisted for {}", "✔".green(), registry.cyan());
+
+    println!(
+        "{} Scoped authentication token persisted for {}",
+        "✔".green(),
+        registry.cyan()
+    );
     Ok(())
 }
 
@@ -347,17 +377,20 @@ async fn pull(tag: &str) -> Result<()> {
     } else {
         "https://index.docker.io".to_string()
     };
-    
+
     let token = auth.get(&registry_url).cloned();
     let client = tet_core::registry::oci::OciClient::new(registry_url, token);
     let cache = tet_core::registry::cache::ArtifactCache::new()?;
 
     let artifact = client.pull(tag).await?;
-    
+
     // Store in CA cache
-    let wasm_digest = format!("sha256:{}", hex::encode(sha2::Sha256::digest(&artifact.blueprint_wasm)));
+    let wasm_digest = format!(
+        "sha256:{}",
+        hex::encode(sha2::Sha256::digest(&artifact.blueprint_wasm))
+    );
     cache.store_blob(&wasm_digest, &artifact.blueprint_wasm)?;
-    
+
     pb.finish_with_message(format!(
         "{} Pulled artifact to local CAS cache. Ready for resurrection.",
         "✔".green()
@@ -622,6 +655,10 @@ async fn main() -> Result<()> {
             temperature,
             max_tokens,
         } => infer_cmd(&client, alias, prompt, model, *temperature, *max_tokens).await,
+        Commands::Ps => ps_cmd(&client, cli.json).await,
+        Commands::Pay { from, to, amount } => pay_cmd(&client, from, to, *amount, cli.json).await,
+        Commands::Logs { alias } => logs_cmd(&client, alias.as_deref(), cli.json).await,
+        Commands::Metrics => metrics_cmd(&client, cli.json).await,
     }
 }
 
@@ -799,8 +836,9 @@ async fn up_artifact(file: &std::path::PathBuf, fuel: Option<u64>) -> anyhow::Re
         }
     };
 
-    let node_workspace = std::env::current_dir()?.join(format!("agent_workspace_{}", uuid::Uuid::new_v4()));
-    
+    let node_workspace =
+        std::env::current_dir()?.join(format!("agent_workspace_{}", uuid::Uuid::new_v4()));
+
     let ctx = tet_core::resurrection::ResurrectionContext {
         artifact,
         node_workspace,
@@ -811,18 +849,422 @@ async fn up_artifact(file: &std::path::PathBuf, fuel: Option<u64>) -> anyhow::Re
     match ctx.boot(fuel).await {
         Ok(agent) => {
             if agent.result.status == tet_core::models::ExecutionStatus::Success {
-                pb.finish_with_message(format!("{} Resurrection Complete! Agent exited cleanly.", "✔".green()));
+                pb.finish_with_message(format!(
+                    "{} Resurrection Complete! Agent exited cleanly.",
+                    "✔".green()
+                ));
             } else if agent.result.status == tet_core::models::ExecutionStatus::OutOfFuel {
                 pb.finish_with_message(format!("{} Execution Trapped: OutOfFuel.", "✘".red()));
                 std::process::exit(137);
             } else {
-                pb.finish_with_message(format!("{} Execution Terminated: {:?}", "✘".red(), agent.result.status));
+                pb.finish_with_message(format!(
+                    "{} Execution Terminated: {:?}",
+                    "✘".red(),
+                    agent.result.status
+                ));
                 std::process::exit(1);
             }
         }
         Err(e) => {
             pb.finish_with_message(format!("{} Resurrection Failed: {}", "✘".red(), e));
             std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 27.1: Control Plane — New Handlers
+// ---------------------------------------------------------------------------
+
+async fn ps_cmd(client: &Client, json_out: bool) -> Result<()> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    pb.set_message("Scanning active agents across the Hive...");
+
+    // Fetch metrics to get market vitals
+    let metrics_res = client
+        .get(&format!("{}/v1/swarm/metrics", get_api_url()))
+        .send()
+        .await;
+
+    // Fetch topology for agent list
+    let topo_res = client
+        .get(&format!("{}/v1/topology", get_api_url()))
+        .send()
+        .await;
+
+    // Fetch peers for market multipliers
+    let peers_res = client
+        .get(&format!("{}/v1/hive/peers", get_api_url()))
+        .send()
+        .await;
+
+    let metrics: serde_json::Value = match metrics_res {
+        Ok(r) if r.status().is_success() => r.json().await.unwrap_or(serde_json::json!({})),
+        _ => serde_json::json!({}),
+    };
+
+    let topology: Vec<serde_json::Value> = match topo_res {
+        Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
+        _ => vec![],
+    };
+
+    let peers: serde_json::Value = match peers_res {
+        Ok(r) if r.status().is_success() => r.json().await.unwrap_or(serde_json::json!({})),
+        _ => serde_json::json!({}),
+    };
+
+    if json_out {
+        let report = serde_json::json!({
+            "agents": topology,
+            "peers": peers["peers"],
+            "metrics": metrics,
+        });
+        pb.finish_and_clear();
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    pb.finish_with_message(format!("{} Sovereign Hive Status", "✔".green()));
+
+    // Agent topology table
+    if !topology.is_empty() {
+        println!(
+            "\n{0: <15} → {1: <15} | {2: <8} | {3: <8} | {4: <12}",
+            "Source".bold(),
+            "Target".bold(),
+            "Calls".bold(),
+            "Errors".bold(),
+            "Avg µs".bold()
+        );
+        println!("{:-<70}", "");
+        for edge in &topology {
+            let source = edge["source"].as_str().unwrap_or("?");
+            let target = edge["target"].as_str().unwrap_or("?");
+            let calls = edge["call_count"].as_u64().unwrap_or(0);
+            let errors = edge["error_count"].as_u64().unwrap_or(0);
+            let latency = edge["total_latency_us"].as_u64().unwrap_or(0);
+            let avg = if calls > 0 { latency / calls } else { 0 };
+
+            let err_col = if errors > 0 {
+                format!("{}", errors).red()
+            } else {
+                format!("{}", errors).green()
+            };
+
+            println!(
+                "{0: <15} → {1: <15} | {2: <8} | {3: <8} | {4: <12}",
+                source.yellow(),
+                target.cyan(),
+                calls,
+                err_col,
+                avg
+            );
+        }
+    } else {
+        println!("\n  {} No active agents on this node.", "ℹ".blue());
+    }
+
+    // Market vitals
+    println!(
+        "\n{} Market Multiplier: {}x  |  Thermal: {}°C  |  Warp: {}µs  |  Oracle: {}µs",
+        "📊".to_string(),
+        metrics["fuel_efficiency_ratio"]
+            .as_f64()
+            .map(|v| format!("{:.2}", v))
+            .unwrap_or("—".into())
+            .cyan(),
+        "—".yellow(),
+        metrics["teleport_warp_us"]
+            .as_u64()
+            .map(|v| format!("{}", v))
+            .unwrap_or("—".into()),
+        metrics["oracle_verification_us"]
+            .as_u64()
+            .map(|v| format!("{}", v))
+            .unwrap_or("—".into()),
+    );
+
+    Ok(())
+}
+
+async fn pay_cmd(client: &Client, from: &str, to: &str, amount: u64, json_out: bool) -> Result<()> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    pb.set_message(format!(
+        "💰 Transferring {} fuel: {} → {}",
+        amount.to_string().yellow(),
+        from.cyan(),
+        to.cyan()
+    ));
+
+    let payload = serde_json::json!({
+        "source_alias": from,
+        "target_alias": to,
+        "amount": amount,
+    });
+
+    let res = client
+        .post(&format!("{}/v1/tet/topup", get_api_url()))
+        .json(&payload)
+        .send()
+        .await;
+
+    match res {
+        Ok(r) if r.status().is_success() => {
+            let body: serde_json::Value = r.json().await.unwrap_or(serde_json::json!({}));
+            if json_out {
+                pb.finish_and_clear();
+                println!("{}", serde_json::to_string_pretty(&body)?);
+            } else {
+                pb.finish_with_message(format!(
+                    "{} Transfer Complete: {} fuel ({} → {})",
+                    "✔".green(),
+                    amount.to_string().yellow(),
+                    from.cyan(),
+                    to.cyan()
+                ));
+            }
+        }
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            if json_out {
+                pb.finish_and_clear();
+                println!(
+                    "{}",
+                    serde_json::json!({"error": body, "status": status.as_u16()})
+                );
+            } else {
+                pb.finish_with_message(format!(
+                    "{} Transfer Failed (HTTP {}): {}",
+                    "✘".red(),
+                    status,
+                    body
+                ));
+            }
+        }
+        Err(e) => {
+            if json_out {
+                pb.finish_and_clear();
+                println!("{}", serde_json::json!({"error": e.to_string()}));
+            } else {
+                pb.finish_with_message(format!("{} Network Error: {}", "✘".red(), e));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn logs_cmd(client: &Client, alias: Option<&str>, json_out: bool) -> Result<()> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    let filter_msg = alias
+        .map(|a| format!(" (filtering: {})", a.cyan()))
+        .unwrap_or_default();
+    pb.set_message(format!("Connecting to TelemetryHub...{}", filter_msg));
+
+    // Connect to the WebSocket telemetry stream
+    // In this implementation, we poll the metrics endpoint once and display
+    // the current snapshot with human-readable icons. A persistent WebSocket
+    // tail would use the /v1/swarm/stream endpoint.
+    let res = client
+        .get(&format!("{}/v1/swarm/metrics", get_api_url()))
+        .send()
+        .await;
+
+    match res {
+        Ok(r) if r.status().is_success() => {
+            let body: serde_json::Value = r.json().await.unwrap_or(serde_json::json!({}));
+
+            if json_out {
+                pb.finish_and_clear();
+                println!("{}", serde_json::to_string_pretty(&body)?);
+                return Ok(());
+            }
+
+            pb.finish_with_message(format!("{} TelemetryHub Live Snapshot", "✔".green()));
+
+            println!(
+                "  🧠 Oracle Fidelity:     {}µs (Ed25519 sign+verify per fetch)",
+                body["oracle_verification_us"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .to_string()
+                    .cyan()
+            );
+            println!(
+                "  ✈️  Teleport Warp:       {}µs (bincode serialize round-trip)",
+                body["teleport_warp_us"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .to_string()
+                    .cyan()
+            );
+            println!(
+                "  💰 Fuel Efficiency:      {}",
+                body["fuel_efficiency_ratio"]
+                    .as_f64()
+                    .map(|v| format!("{:.4}", v))
+                    .unwrap_or("—".into())
+                    .yellow()
+            );
+            println!(
+                "  🌡️  Market Evacuation:   {}ms (thermal panic drill)",
+                body["market_evacuation_ms"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .to_string()
+                    .cyan()
+            );
+            println!(
+                "  🧬 Mitosis Constant:     {}µs (CoW fork latency)",
+                body["mitosis_latency_us"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .to_string()
+                    .cyan()
+            );
+
+            if let Some(a) = alias {
+                println!("\n  {} Filtering for alias '{}' — connect to /v1/swarm/stream for live WebSocket tail.", "ℹ".blue(), a.yellow());
+            }
+        }
+        Ok(r) => {
+            let err = r.text().await.unwrap_or_default();
+            pb.finish_with_message(format!("{} TelemetryHub unavailable: {}", "✘".red(), err));
+        }
+        Err(e) => {
+            pb.finish_with_message(format!(
+                "{} Cannot reach engine at {} — is it running? ({})",
+                "✘".red(),
+                get_api_url().yellow(),
+                e
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+async fn metrics_cmd(client: &Client, json_out: bool) -> Result<()> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    pb.set_message("Running Northstar Benchmarking Suite...");
+
+    let res = client
+        .get(&format!("{}/v1/swarm/metrics", get_api_url()))
+        .send()
+        .await;
+
+    match res {
+        Ok(r) if r.status().is_success() => {
+            let report: serde_json::Value = r.json().await.unwrap_or(serde_json::json!({}));
+
+            if json_out {
+                pb.finish_and_clear();
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                return Ok(());
+            }
+
+            pb.finish_with_message(format!("{} Northstar Report", "✔".green()));
+            println!();
+            println!(
+                "  {0: <28} | {1: <15} | {2: <10}",
+                "Metric".bold(),
+                "Value".bold(),
+                "Ceiling".bold()
+            );
+            println!("  {:-<60}", "");
+
+            let warp = report["teleport_warp_us"].as_u64().unwrap_or(0);
+            let warp_ok = if warp < 200_000 {
+                "✔".green()
+            } else {
+                "✘".red()
+            };
+            println!(
+                "  {0: <28} | {1: <15} | {2: <10} {3}",
+                "Teleport Warp (µs)",
+                warp.to_string().cyan(),
+                "< 200,000",
+                warp_ok
+            );
+
+            let mitosis = report["mitosis_latency_us"].as_u64().unwrap_or(0);
+            let mitosis_ok = if mitosis < 15_000 {
+                "✔".green()
+            } else {
+                "✘".red()
+            };
+            println!(
+                "  {0: <28} | {1: <15} | {2: <10} {3}",
+                "Mitosis Constant (µs)",
+                mitosis.to_string().cyan(),
+                "< 15,000",
+                mitosis_ok
+            );
+
+            let oracle = report["oracle_verification_us"].as_u64().unwrap_or(0);
+            let oracle_ok = if oracle < 5_000 {
+                "✔".green()
+            } else {
+                "✘".red()
+            };
+            println!(
+                "  {0: <28} | {1: <15} | {2: <10} {3}",
+                "Oracle Fidelity (µs)",
+                oracle.to_string().cyan(),
+                "< 5,000",
+                oracle_ok
+            );
+
+            let evac = report["market_evacuation_ms"].as_u64().unwrap_or(0);
+            let evac_ok = if evac < 800 {
+                "✔".green()
+            } else {
+                "✘".red()
+            };
+            println!(
+                "  {0: <28} | {1: <15} | {2: <10} {3}",
+                "Market Evacuation (ms)",
+                evac.to_string().cyan(),
+                "< 800",
+                evac_ok
+            );
+
+            let eff = report["fuel_efficiency_ratio"].as_f64().unwrap_or(0.0);
+            println!(
+                "  {0: <28} | {1: <15} | {2: <10}",
+                "Fuel Efficiency",
+                format!("{:.4}", eff).yellow(),
+                "higher=better"
+            );
+        }
+        Ok(r) => {
+            let err = r.text().await.unwrap_or_default();
+            if json_out {
+                pb.finish_and_clear();
+                println!("{}", serde_json::json!({"error": err}));
+            } else {
+                pb.finish_with_message(format!("{} Metrics unavailable: {}", "✘".red(), err));
+            }
+        }
+        Err(e) => {
+            if json_out {
+                pb.finish_and_clear();
+                println!("{}", serde_json::json!({"error": e.to_string()}));
+            } else {
+                pb.finish_with_message(format!(
+                    "{} Cannot reach engine at {} — is it running? ({})",
+                    "✘".red(),
+                    get_api_url().yellow(),
+                    e
+                ));
+            }
         }
     }
 
