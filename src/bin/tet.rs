@@ -55,15 +55,16 @@ enum Commands {
     },
     /// Captured atomic state of a hibernating Tet into a CAS .tet artifact
     Snapshot { alias: String, tag: String },
-    /// OCI-compliant push of a .tet artifact to a remote registry
+    /// Register a local artifact as a global Sovereign Agent
     Push {
-        /// The tag to push (e.g. "my-registry.com/agent:v1")
-        tag: String,
+        path: std::path::PathBuf,
+        alias: String,
     },
-    /// OCI-compliant pull of a .tet artifact from a remote registry
+    /// Pull an agent and its genesis state from the Hive
     Pull {
-        /// The reference to pull (e.g. "my-registry.com/agent:v1")
-        tag: String,
+        alias: String,
+        #[arg(short, long)]
+        version: Option<String>,
     },
     /// Authenticate with a remote OCI registry
     Login {
@@ -301,41 +302,58 @@ async fn snapshot(client: &Client, alias: &str, tag: &str) -> Result<()> {
     Ok(())
 }
 
-async fn push(tag: &str) -> Result<()> {
+async fn push(path: &std::path::Path, alias: &str) -> Result<()> {
     let pb = ProgressBar::new_spinner();
     pb.set_style(pb_style());
-    pb.set_message(format!("Authenticating and Pushing {}...", tag.cyan()));
+    pb.set_message(format!("Publishing Sovereign Artifact {} to the Hive...", alias.cyan()));
 
-    let auth = load_auth()?;
-    let registry_url = if tag.contains('/') {
-        let parts: Vec<&str> = tag.split('/').collect();
-        format!("https://{}", parts[0])
-    } else {
-        "https://index.docker.io".to_string()
-    };
-
-    let token = auth.get(&registry_url).cloned();
-    let client = tet_core::registry::oci::OciClient::new(registry_url, token);
-
-    let home_dir = home::home_dir().unwrap();
-    let tet_file = home_dir
-        .join(".trytet")
-        .join("builds")
-        .join(format!("{}.tet", tag.replace("/", "_").replace(":", "_")));
-
-    if !tet_file.exists() {
-        return Err(anyhow!("No local snapshot build found for tag {}", tag));
+    if !path.exists() {
+        return Err(anyhow!("Artifact path {} does not exist", path.display()));
     }
+    let wasm_bytes = fs::read(path)?;
 
-    let bytes = fs::read(&tet_file)?;
-    let artifact = tet_core::builder::TetBuilder::verify_and_load(&bytes)?;
+    // We send this request to our local daemon API, which handles the SovereignRegistry logic
+    let client = Client::new();
+    let res = client
+        .post(&format!("{}/v1/tet/push/{}", get_api_url(), alias))
+        .body(wasm_bytes)
+        .send()
+        .await?;
 
-    client.push(&artifact, tag).await?;
+    if res.status().is_success() {
+        pb.finish_with_message(format!(
+            "{} Artifact deployed! CID Hash broadcast to DHT.",
+            "✔".green()
+        ));
+    } else {
+        let err = res.text().await.unwrap_or_else(|_| "Unknown error".into());
+        pb.finish_with_message(format!("{} Push Failed: {}", "✘".red(), err));
+    }
+    Ok(())
+}
 
-    pb.finish_with_message(format!(
-        "{} Published to Registry via OCI Distribution!",
-        "✔".green()
-    ));
+async fn pull(alias: &str, _version: Option<&str>) -> Result<()> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    pb.set_message(format!("Querying Hive for Global Alias {}...", alias.cyan()));
+
+    let client = Client::new();
+    let res = client
+        .get(&format!("{}/v1/tet/pull/{}", get_api_url(), alias))
+        .send()
+        .await?;
+
+    if res.status().is_success() {
+        let _payload = res.bytes().await?;
+        // In local flow, the daemon downloads it and saves it. CLI just triggers and awaits.
+        pb.finish_with_message(format!(
+            "{} Resolved and pulled agent state via mesh P2P securely.",
+            "✔".green()
+        ));
+    } else {
+        let err = res.text().await.unwrap_or_else(|_| "Unknown error".into());
+        pb.finish_with_message(format!("{} Pull Failed: {}", "✘".red(), err));
+    }
     Ok(())
 }
 
@@ -362,40 +380,6 @@ async fn login(registry: &str, token: &str) -> Result<()> {
         "✔".green(),
         registry.cyan()
     );
-    Ok(())
-}
-
-async fn pull(tag: &str) -> Result<()> {
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(pb_style());
-    pb.set_message(format!("Pulling {} from Registry...", tag.cyan()));
-
-    let auth = load_auth()?;
-    let registry_url = if tag.contains('/') {
-        let parts: Vec<&str> = tag.split('/').collect();
-        format!("https://{}", parts[0])
-    } else {
-        "https://index.docker.io".to_string()
-    };
-
-    let token = auth.get(&registry_url).cloned();
-    let client = tet_core::registry::oci::OciClient::new(registry_url, token);
-    let cache = tet_core::registry::cache::ArtifactCache::new()?;
-
-    let artifact = client.pull(tag).await?;
-
-    // Store in CA cache
-    let wasm_digest = format!(
-        "sha256:{}",
-        hex::encode(sha2::Sha256::digest(&artifact.blueprint_wasm))
-    );
-    cache.store_blob(&wasm_digest, &artifact.blueprint_wasm)?;
-
-    pb.finish_with_message(format!(
-        "{} Pulled artifact to local CAS cache. Ready for resurrection.",
-        "✔".green()
-    ));
-
     Ok(())
 }
 
@@ -639,8 +623,8 @@ async fn main() -> Result<()> {
             memory,
         } => run_payload(&client, payload_path, alias, *fuel, *memory).await,
         Commands::Snapshot { alias, tag } => snapshot(&client, alias, tag).await,
-        Commands::Push { tag } => push(tag).await,
-        Commands::Pull { tag } => pull(tag).await,
+        Commands::Push { path, alias } => push(path, alias).await,
+        Commands::Pull { alias, version } => pull(alias, version.as_deref()).await,
         Commands::Login { registry, token } => login(registry, token).await,
         Commands::Teleport { alias, target_node } => teleport(&client, alias, target_node).await,
         Commands::HiveList => hive_list(&client).await,

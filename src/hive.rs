@@ -1,6 +1,5 @@
 use crate::models::manifest::AgentManifest;
-use crate::sandbox::{SnapshotPayload, MAX_SNAPSHOT_SIZE};
-use bincode::Options;
+use crate::sandbox::SnapshotPayload;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,6 +36,7 @@ pub mod security;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HiveCommand {
     Join(HiveNodeIdentity),
+    Heartbeat(crate::network::vitality::Heartbeat),
     Pulse,
     ResolveAlias(String),
     ResolveAliasResponse(Option<crate::models::TetMetadata>),
@@ -68,6 +68,9 @@ pub enum HiveCommand {
     },
     WithdrawalPending(crate::economy::bridge::BridgeIntent),
     MarketBidPacket(crate::market::MarketBid),
+    RegistryQuery(String),
+    RegistryQueryResponse { cid: String, available: bool },
+    ChunkStream { cid: String, seq: u32, chunk: Vec<u8> },
 }
 
 /// The local registry of known Hive peers.
@@ -132,6 +135,7 @@ pub struct HiveServer {
     migration_manager: Arc<MigrationManager>,
     registry_client: Option<Arc<crate::registry::oci::OciClient>>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    pub vitality_manager: Arc<crate::network::vitality::VitalityManager>,
 }
 
 impl HiveServer {
@@ -145,6 +149,7 @@ impl HiveServer {
             migration_manager: Arc::new(MigrationManager::new()),
             registry_client,
             tls_acceptor,
+            vitality_manager: Arc::new(crate::network::vitality::VitalityManager::new(15_000_000)),
         }
     }
 
@@ -171,13 +176,14 @@ impl HiveServer {
                     let mm = migration_manager.clone();
                     let rc = self.registry_client.clone();
                     let acceptor_clone = tls_acceptor.clone();
+                    let vit = self.vitality_manager.clone();
 
                     tokio::spawn(async move {
                         if let Some(acceptor) = acceptor_clone {
                             match acceptor.accept(socket).await {
                                 Ok(mut tls_stream) => {
                                     if let Err(e) =
-                                        Self::handle_connection(&mut tls_stream, p, m, s, mm, rc)
+                                        Self::handle_connection(&mut tls_stream, p, m, s, mm, rc, vit)
                                             .await
                                     {
                                         error!("Hive TLS connection error: {}", e);
@@ -188,7 +194,7 @@ impl HiveServer {
                                 }
                             }
                         } else if let Err(e) =
-                            Self::handle_connection(&mut socket, p, m, s, mm, rc).await
+                            Self::handle_connection(&mut socket, p, m, s, mm, rc, vit).await
                         {
                             error!("Hive connection error: {}", e);
                         }
@@ -207,8 +213,33 @@ impl HiveServer {
         sandbox: Arc<crate::sandbox::WasmtimeSandbox>,
         migration_manager: Arc<MigrationManager>,
         registry_client: Option<Arc<crate::registry::oci::OciClient>>,
+        vitality_manager: Arc<crate::network::vitality::VitalityManager>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Read 4-byte length prefix
+        use crate::network::tunnel::SovereignTunnel;
+        use crate::crypto::AgentWallet;
+        let local_secret = AgentWallet::load_or_create()?.inner_secret_bytes();
+        let expected_remote = [0u8; 32];
+        let mut tunnel = SovereignTunnel::init_responder(&local_secret, &expected_remote)?;
+        
+        info!("Upgrading to Noise IK SovereignTunnel.");
+        // Noise IK Handshake Responder
+        let mut len_buf = [0u8; 4];
+        socket.read_exact(&mut len_buf).await?;
+        let req_len = u32::from_be_bytes(len_buf) as usize;
+        let mut req_payload = vec![0u8; req_len];
+        socket.read_exact(&mut req_payload).await?;
+
+        let mut rx_buf = vec![0u8; 65535];
+        tunnel.noise_state.as_mut().unwrap().read_message(&req_payload, &mut rx_buf)?;
+
+        let mut ix_buf = vec![0u8; 65535];
+        let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+        socket.write_all(&(len as u32).to_be_bytes()).await?;
+        socket.write_all(&ix_buf[..len]).await?;
+        
+        tunnel.to_transport()?;
+
+        // Read 4-byte length prefix for Ciphertext
         let mut len_buf = [0u8; 4];
         socket.read_exact(&mut len_buf).await?;
         let len = u32::from_be_bytes(len_buf) as usize;
@@ -221,11 +252,7 @@ impl HiveServer {
         let mut payload = vec![0u8; len];
         socket.read_exact(&mut payload).await?;
 
-        let command: HiveCommand = bincode::options()
-            .with_limit(MAX_SNAPSHOT_SIZE)
-            .with_fixint_encoding()
-            .allow_trailing_bytes()
-            .deserialize(&payload)?;
+        let command = tunnel.decrypt_payload(&payload)?;
 
         match command {
             HiveCommand::Join(identity) => {
@@ -234,7 +261,13 @@ impl HiveServer {
                     identity.node_id, identity.public_addr
                 );
                 peers.add_peer(identity).await;
-                // Send an Ack (length 0 for simple OK)
+                // Send an Ack
+                let enc = tunnel.encrypt_command(&HiveCommand::Pulse)?;
+                socket.write_all(&(enc.len() as u32).to_be_bytes()).await?;
+                socket.write_all(&enc).await?;
+            }
+            HiveCommand::Heartbeat(hb) => {
+                vitality_manager.record_heartbeat(hb);
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
             HiveCommand::Pulse => {
@@ -424,6 +457,23 @@ impl HiveServer {
                 sandbox.market_handle.process_bid(bid);
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
+            HiveCommand::RegistryQuery(cid) => {
+                info!("Received RegistryQuery for CID {}", cid);
+                let home_dir = home::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+                let block_path = home_dir.join(".trytet").join("registry_cas").join(&cid);
+                let available = block_path.exists();
+                let response = HiveCommand::RegistryQueryResponse { cid, available };
+                let response_bytes = bincode::serialize(&response)?;
+                let res_len = response_bytes.len() as u32;
+                socket.write_all(&res_len.to_be_bytes()).await?;
+                socket.write_all(&response_bytes).await?;
+            }
+            HiveCommand::RegistryQueryResponse { .. } => {
+                socket.write_all(&0u32.to_be_bytes()).await?;
+            }
+            HiveCommand::ChunkStream { .. } => {
+                socket.write_all(&0u32.to_be_bytes()).await?;
+            }
         }
 
         Ok(())
@@ -516,27 +566,64 @@ impl HiveClient {
         tls_connector: Option<tokio_rustls::TlsConnector>,
         domain: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::network::tunnel::SovereignTunnel;
+        use crate::crypto::AgentWallet;
         let mut socket = TcpStream::connect(target_addr).await?;
 
-        let mut payload = bincode::options()
-            .with_limit(MAX_SNAPSHOT_SIZE)
-            .with_fixint_encoding()
-            .allow_trailing_bytes()
-            .serialize(&command)?;
-
-        let len = payload.len() as u32;
-        let mut full_payload = len.to_be_bytes().to_vec();
-        full_payload.append(&mut payload);
+        let local_secret = AgentWallet::load_or_create()?.inner_secret_bytes();
+        let remote_pubkey = [0u8; 32];
+        let mut tunnel = SovereignTunnel::init_initiator(&local_secret, &remote_pubkey)?;
 
         if let Some(connector) = tls_connector {
             let server_name =
                 rustls::pki_types::ServerName::try_from(domain.unwrap_or("localhost"))?.to_owned();
             let mut tls_stream = connector.connect(server_name, socket).await?;
-            tls_stream.write_all(&full_payload).await?;
+            
+            let mut ix_buf = vec![0u8; 65535];
+            let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+            tls_stream.write_all(&(len as u32).to_be_bytes()).await?;
+            tls_stream.write_all(&ix_buf[..len]).await?;
+
+            let mut len_buf = [0u8; 4];
+            tls_stream.read_exact(&mut len_buf).await?;
+            let resp_len = u32::from_be_bytes(len_buf) as usize;
+            let mut resp_payload = vec![0u8; resp_len];
+            tls_stream.read_exact(&mut resp_payload).await?;
+            
+            let mut rx_buf = vec![0u8; 65535];
+            tunnel.noise_state.as_mut().unwrap().read_message(&resp_payload, &mut rx_buf)?;
+            tunnel.to_transport()?;
+
+            let enc_cmd = tunnel.encrypt_command(&command)?;
+            let len = enc_cmd.len() as u32;
+
+            tls_stream.write_all(&len.to_be_bytes()).await?;
+            tls_stream.write_all(&enc_cmd).await?;
+            
             let mut ack = [0u8; 4];
             tls_stream.read_exact(&mut ack).await?;
         } else {
-            socket.write_all(&full_payload).await?;
+            let mut ix_buf = vec![0u8; 65535];
+            let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+            socket.write_all(&(len as u32).to_be_bytes()).await?;
+            socket.write_all(&ix_buf[..len]).await?;
+
+            let mut len_buf = [0u8; 4];
+            socket.read_exact(&mut len_buf).await?;
+            let resp_len = u32::from_be_bytes(len_buf) as usize;
+            let mut resp_payload = vec![0u8; resp_len];
+            socket.read_exact(&mut resp_payload).await?;
+            
+            let mut rx_buf = vec![0u8; 65535];
+            tunnel.noise_state.as_mut().unwrap().read_message(&resp_payload, &mut rx_buf)?;
+            tunnel.to_transport()?;
+
+            let enc_cmd = tunnel.encrypt_command(&command)?;
+            let len = enc_cmd.len() as u32;
+
+            socket.write_all(&len.to_be_bytes()).await?;
+            socket.write_all(&enc_cmd).await?;
+            
             let mut ack = [0u8; 4];
             socket.read_exact(&mut ack).await?;
         }
@@ -548,13 +635,34 @@ impl HiveClient {
         target_addr: &str,
         command: HiveCommand,
     ) -> Result<HiveCommand, Box<dyn std::error::Error>> {
+        use crate::network::tunnel::SovereignTunnel;
+        use crate::crypto::AgentWallet;
         let mut socket = TcpStream::connect(target_addr).await?;
 
-        let payload = bincode::serialize(&command)?;
-        let len = payload.len() as u32;
+        let local_secret = AgentWallet::load_or_create()?.inner_secret_bytes();
+        let remote_pubkey = [0u8; 32];
+        let mut tunnel = SovereignTunnel::init_initiator(&local_secret, &remote_pubkey)?;
+
+        let mut ix_buf = vec![0u8; 65535];
+        let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+        socket.write_all(&(len as u32).to_be_bytes()).await?;
+        socket.write_all(&ix_buf[..len]).await?;
+
+        let mut len_buf = [0u8; 4];
+        socket.read_exact(&mut len_buf).await?;
+        let resp_len = u32::from_be_bytes(len_buf) as usize;
+        let mut resp_payload = vec![0u8; resp_len];
+        socket.read_exact(&mut resp_payload).await?;
+        
+        let mut rx_buf = vec![0u8; 65535];
+        tunnel.noise_state.as_mut().unwrap().read_message(&resp_payload, &mut rx_buf)?;
+        tunnel.to_transport()?;
+
+        let enc_cmd = tunnel.encrypt_command(&command)?;
+        let len = enc_cmd.len() as u32;
 
         socket.write_all(&len.to_be_bytes()).await?;
-        socket.write_all(&payload).await?;
+        socket.write_all(&enc_cmd).await?;
 
         let mut len_buf = [0u8; 4];
         socket.read_exact(&mut len_buf).await?;
@@ -567,11 +675,7 @@ impl HiveClient {
         if res_len > 0 {
             let mut res_payload = vec![0u8; res_len];
             socket.read_exact(&mut res_payload).await?;
-            let response: HiveCommand = bincode::options()
-                .with_limit(MAX_SNAPSHOT_SIZE)
-                .with_fixint_encoding()
-                .allow_trailing_bytes()
-                .deserialize(&res_payload)?;
+            let response = tunnel.decrypt_payload(&res_payload)?;
             Ok(response)
         } else {
             Ok(HiveCommand::Pulse) // empty ack

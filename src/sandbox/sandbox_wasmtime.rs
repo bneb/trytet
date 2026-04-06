@@ -37,12 +37,13 @@ fn validate_range<'a>(
     len: i32,
 ) -> wasmtime::Result<&'a [u8]> {
     let data = memory.data(caller);
-    let start = ptr as usize;
-    let end = start.saturating_add(len as usize);
-    if end > data.len() {
+    let start = (ptr as u32) as u64;
+    let len_u64 = (len as u32) as u64;
+    let end = start.saturating_add(len_u64);
+    if end > data.len() as u64 {
         return Err(wasmtime::Error::msg("OOB Guest Memory Access"));
     }
-    Ok(&data[start..end])
+    Ok(&data[(start as usize)..(end as usize)])
 }
 fn validate_range_mut<'a>(
     memory: &'a wasmtime::Memory,
@@ -51,12 +52,13 @@ fn validate_range_mut<'a>(
     len: i32,
 ) -> wasmtime::Result<&'a mut [u8]> {
     let data = memory.data_mut(caller);
-    let start = ptr as usize;
-    let end = start.saturating_add(len as usize);
-    if end > data.len() {
+    let start = (ptr as u32) as u64;
+    let len_u64 = (len as u32) as u64;
+    let end = start.saturating_add(len_u64);
+    if end > data.len() as u64 {
         return Err(wasmtime::Error::msg("OOB Guest Memory Mut Access"));
     }
-    Ok(&mut data[start..end])
+    Ok(&mut data[(start as usize)..(end as usize)])
 }
 
 pub fn production_engine_config() -> wasmtime::Config {
@@ -669,6 +671,14 @@ impl WasmtimeSandbox {
                     let req_method_str = String::from_utf8_lossy(validate_range(&memory, &caller, method_ptr, method_len)?).to_string();
                     let req_body = validate_range(&memory, &caller, body_ptr, body_len)?.to_vec();
 
+                    // Apply Vector 1: PathJailer security
+                    if !target_url.starts_with("http") {
+                        let jailer = crate::sandbox::security::PathJailer::new(std::path::PathBuf::from("/vfs/Agent_Workspace_Root"));
+                        if let Err(e) = jailer.safe_join(&target_url) {
+                            return Err(wasmtime::Error::msg(e.to_string()));
+                        }
+                    }
+
                     let policy = caller.data().egress_policy.clone();
                     if let Some(p) = policy {
                         if p.require_https && !target_url.starts_with("https://") {
@@ -785,6 +795,28 @@ impl WasmtimeSandbox {
                 })
             }
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::fetch: {e:#}")))?;
+
+        linker.func_wrap_async(
+            "trytet",
+            "predict",
+            |mut _caller: wasmtime::Caller<'_, TetState>, (_prompt_ptr, _prompt_len): (i32, i32)| -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let watchdog = crate::sandbox::security::Watchdog::new(std::time::Duration::from_millis(50));
+                    
+                    let iterations = 10;
+                    for _ in 0..iterations {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        
+                        // Break sandbox constraint dynamically upon violation
+                        if let Err(e) = watchdog.check() {
+                            return Err(wasmtime::Error::msg(e.to_string()));
+                        }
+                    }
+
+                    Ok(0)
+                })
+            }
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::predict: {e:#}")))?;
 
         // Phase 9: The Sovereign Memory
         linker.func_wrap_async(

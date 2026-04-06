@@ -42,6 +42,7 @@ pub mod inference;
 pub mod llama_engine;
 pub mod market;
 pub mod memory;
+pub mod network;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mesh;
 #[cfg(not(target_arch = "wasm32"))]

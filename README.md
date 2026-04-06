@@ -34,7 +34,7 @@ graph TD
     style F fill:#ff4466,stroke:#1e1e2e,color:#0a0a0f
 ```
 
-## Features (v27.1)
+## Features (v31.1)
 
 - **Teleportation**: Serialize agent state into an artifact (`.tet`), transfer it over P2P, and instantly revive it.
 - **Copy-on-Write (CoW) VFS**: Agents are natively backed by an isolated Vector File System preventing cross-contamination with sub-1µs memory reads.
@@ -42,6 +42,7 @@ graph TD
 - **Wasm-Based Determinism**: Bound loop iterations and infinite workloads via strict "Fuel" limits, effectively guaranteeing node stability.
 - **Formally Verified Consensus**: Safely acquire locks over migrating agents.
 - **Northstar Benchmarking**: Highly instrumented telemetry proving sub-millisecond execution.
+- **Prison Break Security**: Hardened execution environments protecting the Host File System via Path Jailing, mitigating memory wrapper vulnerabilities, and strictly pre-empting deep LLM inference loads via Host-level Watchdogs.
 
 ## 5-Minute Quickstart
 

@@ -19,3 +19,5 @@ pub use sandbox_wasmtime::*;
 mod sandbox_polyfill;
 #[cfg(target_arch = "wasm32")]
 pub use sandbox_polyfill::*;
+
+pub mod security;

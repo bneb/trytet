@@ -34,6 +34,10 @@ impl AgentWallet {
         Ok(Self { signing_key })
     }
 
+    pub fn inner_secret_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
+
     pub fn public_key_hex(&self) -> String {
         let verifying_key = self.signing_key.verifying_key();
         hex::encode(verifying_key.to_bytes())

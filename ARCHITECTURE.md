@@ -38,6 +38,7 @@ The cluster is dynamically load-balanced through an **Economic Market Scheduler*
 | `src/mesh.rs` | Inter-agent process RPC routing | Network |
 | `src/hive.rs` | Multi-node P2P cluster discovery | Network |
 | `src/resurrection.rs` | Context-aware Agent artifact reanimation | Lifecycle |
+| `src/sandbox/security.rs` | Hardened Path Jailer, OOB bounds checking, and DoS Watchdogs | Security |
 | `src/telemetry.rs` | Nano-second metrics collection event stream | Observability |
 | `src/benchmarks.rs` | Northstar Performance instrumentation suite | Diagnostics |
 

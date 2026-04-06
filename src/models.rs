@@ -9,6 +9,10 @@ use std::collections::HashMap;
 
 pub mod manifest;
 
+fn default_fuel() -> u64 {
+    50_000_000
+}
+
 /// A request to instantiate and execute a Tet sandbox.
 ///
 /// The payload is a raw WebAssembly binary (not base64 — raw bytes serialized
@@ -33,6 +37,7 @@ pub struct TetExecutionRequest {
     pub injected_files: HashMap<String, String>,
 
     /// Maximum deterministic fuel (Wasm instructions) allowed.
+    #[serde(default = "default_fuel")]
     pub allocated_fuel: u64,
 
     /// Maximum memory allocation in megabytes.
