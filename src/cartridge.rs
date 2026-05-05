@@ -32,8 +32,9 @@
 use dashmap::DashMap;
 use std::time::Instant;
 use thiserror::Error;
-use wasmtime::component::{Component, Linker, Val};
+use wasmtime::component::{Component, Linker, Val, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView, WasiCtxView};
 
 // ---------------------------------------------------------------------------
 // Error Types
@@ -78,6 +79,17 @@ pub enum CartridgeError {
 /// All persistence is handled by the parent Agent's CoW VFS.
 pub struct CartridgeState {
     limits: StoreLimits,
+    wasi: WasiCtx,
+    table: ResourceTable,
+}
+
+impl WasiView for CartridgeState {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,20 +182,27 @@ impl CartridgeManager {
         // 2. Create a fresh child Store with the specified fuel and memory limits
         let limits = StoreLimitsBuilder::new()
             .memory_size(max_memory_mb as usize * 1024 * 1024)
-            .instances(1)
+            .instances(100)
             .tables(10)
             .memories(10)
             .build();
 
-        let state = CartridgeState { limits };
+        let state = CartridgeState { 
+            limits,
+            wasi: WasiCtxBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
         let mut store = Store::new(&self.engine, state);
         store.limiter(|s| &mut s.limits);
         store
             .set_fuel(fuel)
             .map_err(|e| CartridgeError::ExecutionError(format!("Failed to set fuel: {e}")))?;
 
-        // 3. Create a component Linker (empty — cartridges have no imports)
-        let linker: Linker<CartridgeState> = Linker::new(&self.engine);
+        // 3. Create a component Linker and add WASI (empty standard environment)
+        let mut linker: Linker<CartridgeState> = Linker::new(&self.engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker).unwrap_or_else(|e| {
+            tracing::warn!("Failed to add WASI to cartridge linker: {}", e);
+        });
 
         // 4. Instantiate the component
         let instance = linker
@@ -191,19 +210,23 @@ impl CartridgeManager {
             .map_err(|e| classify_cartridge_trap(&e))?;
 
         // 5. Look up the exported `execute` function via the cartridge-v1 interface
-        //    The WIT export path is: trytet:component/cartridge-v1.execute
-        let execute_func = instance
-            .get_func(&mut store, "trytet:component/cartridge-v1#execute")
-            .or_else(|| {
-                // Fallback: try the flattened export name
-                instance.get_func(&mut store, "execute")
-            })
-            .ok_or_else(|| {
-                CartridgeError::InterfaceMismatch(
-                    "Component does not export 'execute' function from cartridge-v1 interface"
-                        .to_string(),
-                )
-            })?;
+        //    We must traverse into the exported interface instance.
+        let instance_index = instance.get_export_index(&mut store, None, "trytet:component/cartridge-v1");
+        let func_index = instance_index.and_then(|i| instance.get_export_index(&mut store, Some(&i), "execute"));
+        
+        let mut execute_func = func_index.and_then(|idx| instance.get_func(&mut store, &idx));
+        
+        if execute_func.is_none() {
+            // Fallback to flattened export name for simpler components
+            execute_func = instance.get_func(&mut store, "execute");
+        }
+
+        let execute_func = execute_func.ok_or_else(|| {
+            CartridgeError::InterfaceMismatch(
+                "Component does not export 'execute' function from cartridge-v1 interface"
+                    .to_string(),
+            )
+        })?;
 
         // 6. Call execute(input) -> result<string, string>
         //    In the Component Model, result<string, string> is represented as a variant:

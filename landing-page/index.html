@@ -20,13 +20,12 @@
     </nav>
 
     <header class="hero">
-        <h1>Your agents can think.<br>Now they can prove.</h1>
+        <h1>The Fastest, Safest Code<br>Evaluator for AI Agents.</h1>
 
         <div style="max-width: 600px; margin: 0 auto 48px; text-align: left;">
             <p style="font-size: 20px; color: var(--text-soft); margin-bottom: 16px;">
-                <span class="text-gradient">We built a deterministic Wasm engine.</span><br><span
-                    class="text-gradient-secondary"> Its fuel-bounded traps and
-                    sub-200µs cold starts safely empower your agentic workflows.</span><br>
+                <span class="text-gradient">Stop waiting on slow Firecracker VMs.</span><br><span
+                    class="text-gradient-secondary"> Trytet runs untrusted Python and JS in fuel-bounded WebAssembly sandboxes with sub-200µs cold starts. Trap infinite loops instantly.</span><br>
             </p>
         </div>
 
@@ -42,18 +41,18 @@
                 <div class="cell-title">src/agent.rs [EXEC]</div>
                 <div class="cell-status"></div>
             </div>
-            <pre><code><span class="tc-keyword">let</span> constraints = <span class="tc-string">r#"{"meetings": 5, "constraints": ["no_conflicts"]}"#</span>;
+            <pre><code><span class="tc-keyword">let</span> untrusted_js = <span class="tc-string">r#"while(true) { console.log("Memory bomb"); }"#</span>;
 
-<span class="tc-comment">// Agent calls a deterministic constraint solver</span>
+<span class="tc-comment">// Agent tests generated code safely</span>
 <span class="tc-keyword">let</span> result = trytet_guest::<span class="tc-func">invoke_cartridge</span>(
-    <span class="tc-string">"z3-solver"</span>,
-    constraints,
+    <span class="tc-string">"js-evaluator"</span>,
+    untrusted_js,
     <span class="tc-keyword">1_000_000</span>, <span class="tc-comment">// Strict fuel budget</span>
 );
 
 <span class="tc-keyword">match</span> result {
-    <span class="tc-func">Ok</span>(json)  => execute_plan(json),
-    <span class="tc-func">Err</span>(<span class="tc-string">FuelExhausted</span>) => fallback_heuristic(), <span class="tc-comment">// Solver hung, agent survived</span>
+    <span class="tc-func">Ok</span>(output)  => execute_plan(output),
+    <span class="tc-func">Err</span>(<span class="tc-string">FuelExhausted</span>) => rewrite_code(), <span class="tc-comment">// Code looped, agent survived</span>
 }</code></pre>
         </div>
     </div>
@@ -77,18 +76,16 @@
         <div class="feature-row">
             <div class="feature-id">SEQ_01</div>
             <div class="feature-content">
-                <h3>Agent formulates a plan</h3>
-                <p>The agent decomposes a natural-language request into sub-problems. Some need fuzzy reasoning. Others
-                    require a mathematically verifiable proof.</p>
+                <h3>Agent generates code</h3>
+                <p>The LLM writes an untrusted Python or JavaScript script to parse user data, scrape a website, or calculate a complex formula.</p>
             </div>
         </div>
 
         <div class="feature-row">
             <div class="feature-id">SEQ_02</div>
             <div class="feature-content">
-                <h3>Cartridge solves it</h3>
-                <p>The agent calls a pre-compiled Wasm Component (Z3, an SMT solver, a type checker). It runs in an
-                    isolated sub-sandbox completely decoupled from orchestration.</p>
+                <h3>Trytet executes it instantly</h3>
+                <p>Instead of waiting 500ms for a Firecracker microVM, Trytet boots an interpreter Cartridge in 100µs to evaluate the script securely.</p>
             </div>
         </div>
 
@@ -96,8 +93,7 @@
             <div class="feature-id">SEQ_03</div>
             <div class="feature-content">
                 <h3>Host traps the failure</h3>
-                <p>Solver enters an infinite loop? Trytet's instruction-level fuel limit traps the execution instantly.
-                    The agent catches the error and continues. Your process never dies.</p>
+                <p>Script enters an infinite loop or tries to allocate 10GB of RAM? Trytet's instruction-level fuel limits trap execution. The agent catches the error and writes better code. Your process never dies.</p>
             </div>
         </div>
     </main>

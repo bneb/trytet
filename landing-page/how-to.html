@@ -117,17 +117,12 @@
         <section class="use-case-section">
             <div class="use-case-content">
                 <div class="use-case-text">
-                    <h2>1. The "Indestructible" AI Agent</h2>
-                    <p>When running long-lived autonomous agents, system crashes, network failures, or API context
-                        limits usually mean starting from scratch. Trytet compiles agents into a persistent footprint.
-                    </p>
+                    <h2>1. The Code-Generation Bottleneck</h2>
+                    <p>Today, AI coding agents rely on slow, heavy Docker containers or Firecracker microVMs to test generated code. This limits them to testing 1-2 permutations per second. Trytet compiles generated code to fuel-bounded WebAssembly, increasing agent execution speed by 10,000x.</p>
                     <ul class="benefits-list">
-                        <li><strong>Zero-Overhead Snapshots:</strong> Agents can be snapshotted instantly without losing
-                            their thread or scratchpad memory.</li>
-                        <li><strong>Hibernation:</strong> Pause execution while waiting on external API results (or
-                            humans) and awake exactly where you left off.</li>
-                        <li><strong>Seamless Resumption:</strong> Clone an agent mid-thought to try different decision
-                            branches simultaneously.</li>
+                        <li><strong>Sub-Millisecond Boot:</strong> Evaluate untrusted Python or JS instantly.</li>
+                        <li><strong>Infinite Loop Protection:</strong> Instruction-level fuel limits trap infinite loops automatically. Your testing pipeline never hangs.</li>
+                        <li><strong>Massive Concurrency:</strong> Test thousands of generated code variations in parallel on a single node.</li>
                     </ul>
                 </div>
 
@@ -163,16 +158,12 @@
         <section class="use-case-section">
             <div class="use-case-content reversed">
                 <div class="use-case-text">
-                    <h2>2. Untrusted OS-Level Code Execution</h2>
-                    <p>Providing your local machine environment to LLM generators exposes you to critical security risks
-                        and corrupt states. Trytet solves this entirely by acting as a zero-trust runtime.</p>
+                    <h2>2. High-Frequency DeFi Agents</h2>
+                    <p>Trading agents lose money when transaction simulations are too slow or unstable. Trytet allows an agent to call a deterministic Cartridge replica of a liquidity pool to simulate a trade in microseconds.</p>
                     <ul class="benefits-list">
-                        <li><strong>Safe Evaluators:</strong> Execute arbitrary, unverified code written by LLMs without
-                            spinning up heavy Docker containers.</li>
-                        <li><strong>Instant Isolation:</strong> Sub-millisecond boot times mean your agent can run
-                            hundreds of micro-tests locally.</li>
-                        <li><strong>Strict Accounting:</strong> Guaranteed CPU-fuel bounds ensure an LLM can't induce an
-                            infinite loop computationally stalling your system.</li>
+                        <li><strong>Zero-Latency Simulations:</strong> Test complex arbitrage opportunities against local state without round-trip latency.</li>
+                        <li><strong>Cryptographic Certainty:</strong> Cartridges trap instantly on mathematical failures, allowing the agent to move to the next opportunity.</li>
+                        <li><strong>Resource Bounding:</strong> The host is guaranteed not to crash, keeping your high-frequency bot online 24/7.</li>
                     </ul>
                 </div>
 
@@ -206,15 +197,11 @@ untrusted_code = <span class="tc-string">"import os; os.system('rm -rf /')"</spa
         <section class="use-case-section">
             <div class="use-case-content">
                 <div class="use-case-text">
-                    <h2>3. Dynamic Multi-Agent Edge Swarming</h2>
-                    <p>Instead of constantly streaming huge vectors of information to a centralized server, send the
-                        logic to where the data naturally lives. The engine natively serializes processes perfectly
-                        across the network boundary.</p>
+                    <h2>3. Untrusted Data Agent UDFs</h2>
+                    <p>Enterprise SaaS platforms are adding Data Agents that write custom scripts to parse user data. Running LLM-generated code safely on your backend usually requires expensive infrastructure. Trytet is a drop-in execution engine for untrusted UDFs.</p>
                     <ul class="benefits-list">
-                        <li><strong>Compute Follows Data:</strong> Transmit an active instance to an edge node to query
-                            its local Vector cache, avoiding roundtrip latency.</li>
-                        <li><strong>Swarm Intelligence:</strong> Duplicate an agent across 10 regions from a single
-                            orchestrator node utilizing simple P2P primitives.</li>
+                        <li><strong>O(1) Memory Teardown:</strong> Run millions of UDFs sequentially without memory leaks or garbage collection pauses.</li>
+                        <li><strong>Strict Path Jailing:</strong> Evaluated scripts have zero access to the host file system or network egress.</li>
                     </ul>
                 </div>
 
