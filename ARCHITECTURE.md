@@ -24,8 +24,6 @@ Migrating an agent from Node A to Node B uses the **Teleportation Protocol** (Ph
 ### 5. Market Scheduler (`src/market.rs`, `src/economy.rs`)
 The cluster is dynamically load-balanced through an **Economic Market Scheduler**:
 - Nodes broadcast Market Bids detailing their thermal stress ($T^\circ$) and CPU availability.
-- The Engine identifies arbitrage opportunities. Node B might offer a 50% discount on Fuel.
-- Highly stressed nodes initiate "Evacuation Teleports" to neighbors to shed load.
 
 ### 6. Neuro-Symbolic Cartridge Substrate (`src/cartridge.rs`, `wit/cartridge.wit`)
 

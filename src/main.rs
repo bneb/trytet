@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
         registry,
         registry_client, // Provided by environment
         hive: Some(hive_peers),
-        gateway: Arc::new(tet_core::gateway::SovereignGateway::default()),
+        gateway: Arc::new(tet_core::gateway::MeshGateway::default()),
         ingress_routes: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     });
 

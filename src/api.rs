@@ -34,7 +34,7 @@ pub struct AppState {
     pub registry: Arc<dyn crate::registry::Registry>,
     pub registry_client: Option<Arc<crate::registry::oci::OciClient>>,
     pub hive: Option<crate::hive::HivePeers>,
-    pub gateway: Arc<crate::gateway::SovereignGateway>,
+    pub gateway: Arc<crate::gateway::MeshGateway>,
     pub ingress_routes: Arc<RwLock<HashMap<String, crate::oracle::IngressRoute>>>,
 }
 

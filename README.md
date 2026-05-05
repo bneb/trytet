@@ -21,7 +21,7 @@ Multi-layer stack. Technical details in the [Architecture Guide](ARCHITECTURE.md
 
 ```mermaid
 graph TD
-    A[Sovereign Gateway] -->|Ingress| B(Trytet API)
+    A[Mesh Gateway] -->|Ingress| B(Trytet API)
     B --> C{Mesh Router}
     C -->|Local Execution| D[Wasmtime Sandbox]
     C -->|P2P RPC| E[Hive Peers]

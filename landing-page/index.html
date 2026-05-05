@@ -1,215 +1,146 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trytet | The Runtime for Trustworthy Agents</title>
-    <meta name="description" content="Trytet is the deterministic execution substrate where AI agents invoke formal solvers with microsecond overhead and hard resource isolation.">
-
-    <!-- Inline Theme Bootstrapper to prevent raw "White Flash" on load -->
-    <script>
-        (function() {
-            try {
-                var localTheme = localStorage.getItem('trytet-theme');
-                var sysTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-                var theme = localTheme || sysTheme;
-                document.documentElement.setAttribute('data-theme', theme);
-            } catch (e) {}
-        })();
-    </script>
-
-    <!-- Typography -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    
-    <!-- Styles & State -->
+    <title>Trytet | The Optimally Solved Agentic Sandbox</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="theme.js" defer></script>
 </head>
+
 <body>
 
-    <nav aria-label="Main Navigation">
-        <a href="#" class="nav-brand" aria-label="Trytet Home">
-            <!-- Native CSS Nested Diamond Sigil -->
-            <div class="trytet-sigil" aria-hidden="true">
-                <div class="trytet-substrate"></div>
-                <div class="trytet-core"></div>
-            </div>
-            <span class="brand-text">Trytet</span>
-            <span style="font-size: 11px; color: var(--text-secondary); font-weight: 400; letter-spacing: 0.02em;">The optimally solved agentic sandbox.</span>
-        </a>
-        
-        <div class="nav-actions">
-            <a href="how-to.html" style="color: var(--text-primary); text-decoration: none; font-weight: 500; font-size: 14px; margin-right: 12px;">Docs</a>
-            <div class="theme-toggle" id="theme-toggle" role="button" tabindex="0" aria-label="Toggle Light and Dark Mode">
-                <div class="theme-dot">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
-                    </svg>
-                </div>
-            </div>
-            <a href="https://github.com/bneb/trytet" target="_blank" rel="noopener noreferrer">
-                <button class="btn">GitHub</button>
-            </a>
+    <nav>
+        <a href="#" class="brand">Trytet</a>
+        <div class="nav-links">
+            <a href="https://github.com/bneb/trytet">GitHub</a>
+            <a href="mailto:hello@trytet.com">Contact</a>
+            <a href="#pricing" class="btn">Pricing</a>
         </div>
     </nav>
 
     <header class="hero">
-        <h1>Your agents can think. <br><span class="text-soft">Now they can prove.</span></h1>
-        <p class="subtitle">Agents call solvers. Solvers hang. Trytet makes sure the agent doesn't. Deterministic Wasm execution with fuel-bounded traps, sub-200µs cold start, and live state migration.</p>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-            <a href="#waitlist"><button class="btn" style="font-size: 16px; padding: 14px 32px;">Join the Waitlist</button></a>
-            <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-secondary); padding: 14px 0;">Built with Rust + Wasm Component Model</span>
+        <h1>Your agents can think.<br>Now they can prove.</h1>
+
+        <div style="max-width: 600px; margin: 0 auto 48px; text-align: left;">
+            <p style="font-size: 20px; color: var(--text-soft); margin-bottom: 16px;">
+                <span class="text-gradient">We built a deterministic Wasm engine.</span><br><span
+                    class="text-gradient-secondary"> Its fuel-bounded traps and
+                    sub-200µs cold starts safely empower your agentic workflows.</span><br>
+            </p>
+        </div>
+
+        <div class="cta-row">
+            <a href="how-to.html" class="btn">View Use Cases</a>
+            <a href="#pricing" class="btn btn-primary">Buy License</a>
         </div>
     </header>
 
-    <main class="grid-12">
-        
-        <!-- How It Works: 3-step flow -->
-        <section class="card" aria-label="How It Works - Step 1" style="grid-column: span 4;">
-            <div class="card-label">01 · Reason</div>
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">Agent formulates a plan</div>
-            <div style="font-size: 14px; color: var(--text-secondary); line-height: 1.6;">
-                The agent decomposes a request into sub-problems. Some need fuzzy reasoning. Others need a proof.
+    <div class="execution-cell-container">
+        <div class="execution-cell">
+            <div class="cell-header">
+                <div class="cell-title">src/agent.rs [EXEC]</div>
+                <div class="cell-status"></div>
             </div>
-        </section>
+            <pre><code><span class="tc-keyword">let</span> constraints = <span class="tc-string">r#"{"meetings": 5, "constraints": ["no_conflicts"]}"#</span>;
 
-        <section class="card" aria-label="How It Works - Step 2" style="grid-column: span 4;">
-            <div class="card-label">02 · Invoke</div>
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">Cartridge solves it</div>
-            <div style="font-size: 14px; color: var(--text-secondary); line-height: 1.6;">
-                The agent calls <code style="color: var(--accent-magenta); font-family: 'JetBrains Mono', monospace; font-size: 12px;">invoke_cartridge("z3-solver", constraints, fuel)</code>. The solver runs in its own fuel-bounded sub-sandbox.
-            </div>
-        </section>
-
-        <section class="card" aria-label="How It Works - Step 3" style="grid-column: span 4;">
-            <div class="card-label">03 · Survive</div>
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">Host traps the failure</div>
-            <div style="font-size: 14px; color: var(--text-secondary); line-height: 1.6;">
-                Solver hangs? Fuel trap fires in <span style="color: var(--accent-green); font-family: 'JetBrains Mono', monospace; font-size: 12px;">&lt; 100µs</span>. Agent continues. No process kill.
-            </div>
-        </section>
-
-        <!-- Dashboard Card 1: Fuel Gauge -->
-        <section class="card" aria-label="System Budget Metric">
-            <div class="card-label">Cartridge Fuel Budget</div>
-            <div class="fuel-metric">72.04%</div>
-            <div class="fuel-wrap" aria-hidden="true">
-                <div class="fuel-bar">
-                    <div class="fuel-fill"></div>
-                </div>
-            </div>
-            <div class="card-meta">
-                <span>Cartridge: z3-solver</span>
-                <span style="color: var(--accent-green); font-weight: 500;">SAT</span>
-            </div>
-        </section>
-
-        <!-- Dashboard Card 2: Teleport Pulse -->
-        <section class="card" aria-label="State Migration Latency Metric">
-            <div class="card-label">State Migration Latency</div>
-            <div class="teleport-stage" aria-hidden="true">
-                <div class="ripple" style="animation-delay: 0s;"></div>
-                <div class="ripple" style="animation-delay: 0.6s;"></div>
-                <div class="pulse-label">SUB-MS PULSE</div>
-            </div>
-            <div class="card-meta">
-                <span>Route: Edge_NYC → Edge_LON</span>
-                <span style="color: var(--accent-magenta); font-family: 'JetBrains Mono', monospace; font-weight: 500;">0.34ms</span>
-            </div>
-        </section>
-
-        <!-- Code Well -->
-        <section class="code-block" aria-label="SDK Code Example">
-<pre><code><span class="tc-comment">// Your agent calls a constraint solver as naturally as calling a function</span>
-<span class="tc-keyword">let</span> schedule = <span class="tc-func">invoke_cartridge</span>(
+<span class="tc-comment">// Agent calls a deterministic constraint solver</span>
+<span class="tc-keyword">let</span> result = trytet_guest::<span class="tc-func">invoke_cartridge</span>(
     <span class="tc-string">"z3-solver"</span>,
-    <span class="tc-string">r#"{"meetings": 5, "constraints": ["no_conflicts"]}"#</span>,
-    <span class="tc-string">1_000_000</span>,  <span class="tc-comment">// fuel budget</span>
+    constraints,
+    <span class="tc-keyword">1_000_000</span>, <span class="tc-comment">// Strict fuel budget</span>
 );
 
-<span class="tc-keyword">match</span> schedule {
-    <span class="tc-func">Ok</span>(json)  => display_calendar(json),
-    <span class="tc-func">Err</span>(<span class="tc-string">FuelExhausted</span>) => fallback_heuristic(),  <span class="tc-comment">// solver hung, agent survived</span>
+<span class="tc-keyword">match</span> result {
+    <span class="tc-func">Ok</span>(json)  => execute_plan(json),
+    <span class="tc-func">Err</span>(<span class="tc-string">FuelExhausted</span>) => fallback_heuristic(), <span class="tc-comment">// Solver hung, agent survived</span>
 }</code></pre>
-        </section>
+        </div>
+    </div>
 
-        <!-- Metrics row -->
-        <section class="card" aria-label="Cold Start Metric" style="grid-column: span 3;">
-            <div class="card-label">Cold Start</div>
-            <div class="fuel-metric" style="font-size: 28px; color: var(--accent-green);">&lt; 200µs</div>
-            <div class="card-meta"><span>1000× faster than Docker</span></div>
-        </section>
+    <section class="metrics-row">
+        <div class="metric-item">
+            <div class="metric-value">&lt; 100µs</div>
+            <div class="metric-label">Cartridge Spin-up</div>
+        </div>
+        <div class="metric-item">
+            <div class="metric-value">O(1)</div>
+            <div class="metric-label">Memory Teardown</div>
+        </div>
+        <div class="metric-item">
+            <div class="metric-value">&lt; 2ms</div>
+            <div class="metric-label">Live Migration</div>
+        </div>
+    </section>
 
-        <section class="card" aria-label="Cartridge Spin-up" style="grid-column: span 3;">
-            <div class="card-label">Cartridge Spin-up</div>
-            <div class="fuel-metric" style="font-size: 28px; color: var(--accent-blue);">&lt; 100µs</div>
-            <div class="card-meta"><span>Solver invocation overhead</span></div>
-        </section>
-
-        <section class="card" aria-label="Memory Per Agent" style="grid-column: span 3;">
-            <div class="card-label">Per Agent</div>
-            <div class="fuel-metric" style="font-size: 28px; color: var(--accent-magenta);">&lt; 5MB</div>
-            <div class="card-meta"><span>Full sandbox + VFS</span></div>
-        </section>
-
-        <section class="card" aria-label="Live Migration" style="grid-column: span 3;">
-            <div class="card-label">Live Migration</div>
-            <div class="fuel-metric" style="font-size: 28px; color: var(--accent-green);">&lt; 2ms</div>
-            <div class="card-meta"><span>Cross-node teleportation</span></div>
-        </section>
-
-        <!-- Waitlist CTA -->
-        <section id="waitlist" class="card" aria-label="Waitlist" style="grid-column: span 12; text-align: center; padding: 48px 32px;">
-            <div style="font-size: 24px; font-weight: 700; margin-bottom: 8px;">Ship agents that can't crash your system.</div>
-            <div style="font-size: 15px; color: var(--text-secondary); margin-bottom: 28px; max-width: 500px; margin-left: auto; margin-right: auto;">
-                Trytet is in private beta. Join the waitlist for early access to the runtime, SDK, and cartridge registry.
+    <main class="features-container">
+        <div class="feature-row">
+            <div class="feature-id">SEQ_01</div>
+            <div class="feature-content">
+                <h3>Agent formulates a plan</h3>
+                <p>The agent decomposes a natural-language request into sub-problems. Some need fuzzy reasoning. Others
+                    require a mathematically verifiable proof.</p>
             </div>
-            <form id="waitlist-form" style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;" onsubmit="handleWaitlist(event)">
-                <input 
-                    type="email" 
-                    id="waitlist-email"
-                    placeholder="you@company.com" 
-                    required
-                    style="
-                        padding: 12px 20px; 
-                        border-radius: 8px; 
-                        border: 1px solid var(--border-subtle); 
-                        background: var(--bg-primary); 
-                        color: var(--text-primary); 
-                        font-family: 'Inter', sans-serif; 
-                        font-size: 14px; 
-                        width: 280px;
-                        outline: none;
-                    "
-                >
-                <button type="submit" class="btn" style="font-size: 14px; padding: 12px 28px;">Get Early Access</button>
-            </form>
-            <div id="waitlist-thanks" style="display: none; color: var(--accent-green); font-weight: 500; margin-top: 16px; font-size: 14px;">
-                ✓ You're on the list. We'll be in touch.
-            </div>
-        </section>
+        </div>
 
+        <div class="feature-row">
+            <div class="feature-id">SEQ_02</div>
+            <div class="feature-content">
+                <h3>Cartridge solves it</h3>
+                <p>The agent calls a pre-compiled Wasm Component (Z3, an SMT solver, a type checker). It runs in an
+                    isolated sub-sandbox completely decoupled from orchestration.</p>
+            </div>
+        </div>
+
+        <div class="feature-row">
+            <div class="feature-id">SEQ_03</div>
+            <div class="feature-content">
+                <h3>Host traps the failure</h3>
+                <p>Solver enters an infinite loop? Trytet's instruction-level fuel limit traps the execution instantly.
+                    The agent catches the error and continues. Your process never dies.</p>
+            </div>
+        </div>
     </main>
 
-    <footer style="text-align: center; padding: 40px 20px; color: var(--text-secondary); font-size: 13px; border-top: 1px solid var(--border-subtle);">
-        <span>Trytet · The optimally solved agentic sandbox.</span>
-        <span style="margin: 0 8px;">·</span>
-        <a href="https://github.com/bneb/trytet" target="_blank" rel="noopener noreferrer" style="color: var(--text-secondary); text-decoration: none;">GitHub</a>
-    </footer>
+    <section id="pricing" class="pricing-section">
+        <div class="pricing-header">
+            <h2>Deterministic execution.<br>Predictable pricing.</h2>
+            <p>Deploy local Wasmtime environments or power your entire mesh.</p>
+        </div>
 
-    <script>
-        function handleWaitlist(e) {
-            e.preventDefault();
-            var email = document.getElementById('waitlist-email').value;
-            // In production: POST to your backend or Typeform
-            console.log('Waitlist signup:', email);
-            document.getElementById('waitlist-form').style.display = 'none';
-            document.getElementById('waitlist-thanks').style.display = 'block';
-        }
-    </script>
+        <div class="pricing-grid">
+            <div class="pricing-card">
+                <div class="tier-name">Hobby</div>
+                <div class="price">$0 <span>/ month</span></div>
+                <div class="tier-desc">For open-source developers and local experimentation.</div>
+
+                <ul class="features-list">
+                    <li>Local Wasmtime execution</li>
+                    <li>Basic determinism traps</li>
+                    <li>Community support via GitHub</li>
+                </ul>
+
+                <a href="https://github.com/trytet" class="btn">Get Started</a>
+            </div>
+
+            <div class="pricing-card enterprise">
+                <div class="tier-name">Enterprise Mesh</div>
+                <div class="price">$999 <span>/ month</span></div>
+                <div class="tier-desc">For production workloads requiring cryptographic certainty.</div>
+
+                <ul class="features-list">
+                    <li>100% Offline Ed25519 License Key</li>
+                    <li>Advanced O(1) memory teardown</li>
+                    <li>Cluster teleportation \u0026 P2P Hive</li>
+                    <li>Priority bug fixes and engineering support</li>
+                </ul>
+
+                <a href="#buy" class="btn btn-primary"
+                    onclick="alert('Initiating offline Ed25519 validation checkout flow...');">Purchase License</a>
+            </div>
+        </div>
+    </section>
 
 </body>
+
 </html>
