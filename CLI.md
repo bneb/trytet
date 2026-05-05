@@ -1,52 +1,50 @@
-# Trytet CLI Operator's Reference (v27.1)
+# CLI Reference
 
-The Trytet CLI (`tet`) is the primary interface for managing your local sandbox and cluster.
+The `tet` CLI manages agents, clusters, and the fuel economy.
 
 ### Global Flags
-- `--json`: Output raw JSON blocks instead of human-readable formats. Standardized for piping into `jq`.
+- `--json`: Machine-readable JSON output.
 
-## Lifecycle Commands
+## Lifecycle
 
 ### `tet up <file.wasm> [--fuel 100000]`
-Boots a local WebAssembly agent into the Engine.
-- Automatically assigns an execution alias if one is not provided.
-- Registers them in the global Hive dictionary.
+Boot an agent. Assigns an alias if not provided. Registers in the Hive.
 
 ### `tet run <file.wasm> --alias <name>`
-Executes a stateless Wasm payload and waits for completion. Best for scripts, not Daemons.
+Execute a stateless payload and wait for completion. For scripts, not daemons.
 
 ### `tet snapshot <alias> <tag>`
-Captures the live memory and VFS of the `alias` and exports to an OCI artifact with name `tag`.
+Capture live memory and VFS. Export as OCI artifact.
 
 ## Teleportation & Clustering
 
 ### `tet teleport <alias> <target_node>`
-Force-migrates a live agent from the current node's active memory to the memory of `target_node`. Pauses the agent, serializes them, and ships them via RPC.
+Migrate a live agent to `target_node`. Pause, serialize, stream, resume.
 
 ### `tet swarm`
-Outputs a topological map of all agents across the cluster and their interconnects.
+Topological map of all agents and interconnects.
 
 ### `tet hive-list`
-List all securely connected P2P Trytet nodes in the current Hive context.
+List connected P2P nodes in the current Hive.
 
 ### `tet bridge <alias> --path <route>`
-Exposes a Wasm agent to the external internet. Example: `tet bridge web-ui --path /demo` means `GET localhost:3000/demo/` resolves directly to the Memory of the agent `web-ui`.
+Expose an agent to HTTP. `tet bridge web-ui --path /demo` routes `GET /demo/` to agent memory.
 
 ## Economy & Market
 
 ### `tet market-list`
-List all real-time Fuel bid multipliers and Thermal stress factors across the Hive. 
+Real-time Fuel bid multipliers and thermal stress across the Hive.
 
 ### `tet pay <from> <to> <amount>`
-Transfer Trytet Fuel from the balance of one Agent to another. Useful for triggering Genesis Factories.
+Transfer Fuel between agents.
 
 ## Observability
 
 ### `tet ps`
-A live snapshot table of all running agents, memory consumption, latency averages across calls, error counts, and vital Market multipliers.
+Running agents: memory, latency, error counts, market multipliers.
 
 ### `tet metrics`
-Runs and prints the **Northstar Benchmarking report** across four critical sub-millisecond latencies. Pass/Fail ceilings ensure the core engine stays compliant.
+Northstar benchmark report across five critical latencies.
 
 ### `tet logs -f <alias>`
-Tail the real-time TelemetryHub event stream. Enriched with human-readable emojis for `TeleportWarp` (✈️), `OracleFidelity` (🧠), `FuelBurn` (💰), and `Evacuation` (🌡️).
+Tail telemetry. Enriched with icons: ✈️ TeleportWarp, 🧠 OracleFidelity, 💰 FuelBurn, 🌡️ Evacuation.

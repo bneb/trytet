@@ -1,6 +1,6 @@
 # Trytet Architecture
 
-Trytet is a true "Polyglot Monolith" built to orchestrate, execute, and migrate Wasm-based Sovereign Agents at sub-millisecond latencies. 
+Trytet is a polyglot monolith for orchestrating, executing, and migrating Wasm-based agents at sub-millisecond latencies.
 
 ## System Layers
 
@@ -24,8 +24,43 @@ Migrating an agent from Node A to Node B uses the **Teleportation Protocol** (Ph
 ### 5. Market Scheduler (`src/market.rs`, `src/economy.rs`)
 The cluster is dynamically load-balanced through an **Economic Market Scheduler**:
 - Nodes broadcast Market Bids detailing their thermal stress ($T^\circ$) and CPU availability.
-- The Engine identifies "arbitrage" opportunities — e.g. Node B is offering a 50% discount on Fuel.
+- The Engine identifies arbitrage opportunities. Node B might offer a 50% discount on Fuel.
 - Highly stressed nodes initiate "Evacuation Teleports" to neighbors to shed load.
+
+### 6. Neuro-Symbolic Cartridge Substrate (`src/cartridge.rs`, `wit/cartridge.wit`)
+
+The Cartridge layer introduces a boundary between stochastic reasoning and deterministic computation. An agent formulates a plan; the Cartridge Substrate executes the formally verifiable portion inside a resource-bounded sub-sandbox.
+
+Cartridges are Wasm Components adhering to the `trytet:component/cartridge-v1` WIT interface. The host function `trytet::invoke_component` bridges the parent agent's linear memory to a child `Store` with independent fuel and memory limits. A Cartridge cannot destabilize its caller.
+
+```mermaid
+graph TD
+    A["Agent<br/>fuzzy plan"] -->|"trytet::invoke_component<br/>(component_id, payload, fuel)"| B["CartridgeManager"]
+    B --> C{"Compiled<br/>Cache"}
+    C -->|"O(1) hit"| D["Child Store<br/>fuel + memory limits"]
+    C -->|miss| E["Cranelift AOT"]
+    E --> D
+    D --> F["Instantiate Component"]
+    F --> G["execute(payload)"]
+    G --> H{"Outcome"}
+    H -->|"Ok(json)"| I["Return to Parent<br/>refund unused fuel"]
+    H -->|FuelExhausted| J["Trap · No refund"]
+    H -->|"Err(msg)"| K["Structured error"]
+    F -.->|"Drop Store"| L["O(1) reclamation"]
+
+    style A fill:#7c3aed,stroke:#1e1e2e,color:#fff
+    style B fill:#0891b2,stroke:#1e1e2e,color:#fff
+    style D fill:#059669,stroke:#1e1e2e,color:#fff
+    style J fill:#dc2626,stroke:#1e1e2e,color:#fff
+```
+
+Key properties:
+
+- **Fuel Isolation**: Each cartridge receives a fixed fuel budget drawn from the parent's balance. Exhaustion produces a `FuelExhausted` trap. No host instability.
+- **Memory Boundaries**: Dedicated `StoreLimits` enforce per-cartridge memory caps. The canonical ABI handles string serialization; the host never shares a raw pointer.
+- **$O(1)$ Reclamation**: Dropping the child `Store` frees all guest memory in constant time. No GC pause.
+- **Pre-Compilation Cache**: `Component::new()` triggers Cranelift. The `CartridgeManager` caches compiled artifacts in a `DashMap` by content ID.
+- **Spin-up Overhead**: Cached instantiation targets $< 100\mu s$ (p99 $< 500\mu s$). Bottleneck is `Linker::instantiate`, not compilation.
 
 ## Module Map
 
@@ -33,14 +68,16 @@ The cluster is dynamically load-balanced through an **Economic Market Scheduler*
 |---|---|---|
 | `src/main.rs` | Boots the HTTP Server and Engine | Daemon |
 | `src/sandbox.rs` | Wasmtime Host Configuration | Compute |
+| `src/cartridge.rs` | Component Model Cartridge Manager | Compute |
 | `src/market.rs` | Market bidding metrics and arbitrage | Orchestration |
 | `src/economy.rs` | Fuel voucher issuance and settlement | Orchestration |
 | `src/mesh.rs` | Inter-agent process RPC routing | Network |
 | `src/hive.rs` | Multi-node P2P cluster discovery | Network |
 | `src/resurrection.rs` | Context-aware Agent artifact reanimation | Lifecycle |
-| `src/sandbox/security.rs` | Hardened Path Jailer, OOB bounds checking, and DoS Watchdogs | Security |
-| `src/telemetry.rs` | Nano-second metrics collection event stream | Observability |
-| `src/benchmarks.rs` | Northstar Performance instrumentation suite | Diagnostics |
+| `src/sandbox/security.rs` | Path Jailer, OOB bounds checking, DoS Watchdogs | Security |
+| `src/telemetry.rs` | Nanosecond metrics event stream | Observability |
+| `src/benchmarks.rs` | Northstar performance suite | Diagnostics |
+| `wit/cartridge.wit` | Cartridge WIT interface definition | Contract |
 
 ## Teleportation Flow
 
@@ -50,4 +87,22 @@ The cluster is dynamically load-balanced through an **Economic Market Scheduler*
 4. CoW VFS vectors are differential-snapshotted.
 5. Node A acquires a transit lock over Hive Gossip.
 6. Payload is streamed to Node B (`/v1/tet/execute`).
-7. Node B deserializes and injects it back directly into Wasmtime in under $200\mu s$.
+7. Node B deserializes and resumes execution in under $200\mu s$.
+
+## Cartridge Interface Contract
+
+Any Wasm Component exporting this interface can be loaded and executed by an agent at runtime.
+
+```wit
+package trytet:component;
+
+interface cartridge-v1 {
+    execute: func(input: string) -> result<string, string>;
+}
+
+world tool-guest {
+    export cartridge-v1;
+}
+```
+
+Host sends JSON as `input`, receives JSON as output. The guest owns no resources. Fuel, memory, and lifecycle are host-controlled.

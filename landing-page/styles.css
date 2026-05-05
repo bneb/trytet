@@ -363,3 +363,18 @@ nav {
 .code-block .tc-keyword { color: var(--accent-blue); }
 .code-block .tc-func { color: var(--accent-magenta); }
 .code-block .tc-string { color: var(--accent-green); }
+
+/* Responsive: 3-col and 4-col cards go full width on mobile */
+@media (max-width: 768px) {
+    .card[style*="span 3"],
+    .card[style*="span 4"] {
+        grid-column: span 12 !important;
+    }
+}
+
+/* Waitlist input focus */
+#waitlist-email:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+

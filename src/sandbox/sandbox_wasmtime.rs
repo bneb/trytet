@@ -97,6 +97,8 @@ struct TetState {
     pub max_egress_bytes: u64,
     pub gateway: Arc<crate::gateway::SovereignGateway>,
     pub market_handle: Arc<crate::market::HiveMarket>,
+    // Phase 33.1: Neuro-Symbolic Cartridge Substrate
+    pub cartridge_manager: Arc<crate::cartridge::CartridgeManager>,
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,8 @@ pub struct WasmtimeSandbox {
     pub quota_manager: Arc<crate::fortress::QuotaManager>,
     pub gateway: Arc<crate::gateway::SovereignGateway>,
     pub market_handle: Arc<crate::market::HiveMarket>,
+    // Phase 33.1: Neuro-Symbolic Cartridge Substrate
+    pub cartridge_manager: Arc<crate::cartridge::CartridgeManager>,
 }
 
 impl WasmtimeSandbox {
@@ -158,6 +162,9 @@ impl WasmtimeSandbox {
             oracle.clone(),
         ));
 
+        // Phase 33.1: Create CartridgeManager sharing the same Engine
+        let cartridge_manager = Arc::new(crate::cartridge::CartridgeManager::new(&engine));
+
         Ok(Self {
             engine,
             snapshots: Arc::new(RwLock::new(HashMap::new())),
@@ -173,6 +180,7 @@ impl WasmtimeSandbox {
             quota_manager: Arc::new(crate::fortress::QuotaManager::new()),
             gateway: Arc::new(crate::gateway::SovereignGateway::default()),
             market_handle: Arc::new(crate::market::HiveMarket::new(local_node_id)),
+            cartridge_manager,
         })
     }
 
@@ -419,6 +427,8 @@ impl WasmtimeSandbox {
             max_egress_bytes,
             gateway: gateway.clone(),
             market_handle: market_handle.clone(),
+            // Phase 33.1: Neuro-Symbolic Cartridge Substrate
+            cartridge_manager: Arc::new(crate::cartridge::CartridgeManager::new(engine)),
         };
 
         let mut store = Store::new(engine, state);
@@ -1358,6 +1368,122 @@ impl WasmtimeSandbox {
                 })
             },
         ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::reclaim: {e:#}")))?;
+
+        // Phase 33.1: Neuro-Symbolic Cartridge Substrate — invoke_component
+        // Signature: (component_id_ptr, component_id_len, payload_ptr, payload_len, fuel: i64, out_ptr, out_len_ptr) -> i32
+        // Return codes: 0=success, 1=fuel_exhausted, 2=buffer_too_small, 3=compilation_failed,
+        //               4=interface_mismatch, 5=execution_error, 6=registry_error
+        linker.func_wrap_async(
+            "trytet",
+            "invoke_component",
+            |mut caller: Caller<'_, TetState>,
+             (cid_ptr, cid_len, payload_ptr, payload_len, fuel, out_ptr, out_len_ptr): (i32, i32, i32, i32, i64, i32, i32)|
+             -> Box<dyn std::future::Future<Output = wasmtime::Result<i32>> + Send + '_> {
+                Box::new(async move {
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(m) => m,
+                        None => return Err(wasmtime::Error::msg("Memory Error")),
+                    };
+
+                    // 1. Read component ID and payload from guest linear memory
+                    let cid_bytes = validate_range(&memory, &caller, cid_ptr, cid_len)?.to_vec();
+                    let component_id = String::from_utf8_lossy(&cid_bytes).to_string();
+
+                    let payload_bytes = validate_range(&memory, &caller, payload_ptr, payload_len)?.to_vec();
+                    let payload = String::from_utf8_lossy(&payload_bytes).to_string();
+
+                    // 2. Deduct the fuel from the parent Agent
+                    let fuel_to_give = fuel as u64;
+                    let max_fuel = caller.get_fuel().unwrap_or(0);
+                    if fuel_to_give > max_fuel {
+                        return Ok(1); // FuelExhausted (parent can't afford it)
+                    }
+                    let _ = caller.set_fuel(max_fuel - fuel_to_give);
+
+                    // 3. Invoke the Cartridge via the CartridgeManager
+                    let cartridge_mgr = caller.data().cartridge_manager.clone();
+
+                    let result = cartridge_mgr.invoke(
+                        &component_id,
+                        &payload,
+                        fuel_to_give,
+                        512, // Default max_memory_mb for cartridges
+                    );
+
+                    match result {
+                        Ok((output, metrics)) => {
+                            // Refund unused fuel to the parent
+                            let refund = fuel_to_give.saturating_sub(metrics.fuel_consumed);
+                            if refund > 0 {
+                                if let Ok(current) = caller.get_fuel() {
+                                    let _ = caller.set_fuel(current + refund);
+                                }
+                            }
+
+                            let response_bytes = output.as_bytes();
+                            let response_len = response_bytes.len() as i32;
+
+                            // Re-borrow memory after mutation
+                            let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
+
+                            // Check guest buffer size
+                            let len_slice = validate_range(&memory, &caller, out_len_ptr, 4)?;
+                            let mut len_buf = [0u8; 4];
+                            len_buf.copy_from_slice(len_slice);
+                            let guest_buffer_size = i32::from_le_bytes(len_buf);
+
+                            if response_len > guest_buffer_size {
+                                // Buffer too small — write required size
+                                let required = response_len.to_le_bytes();
+                                if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                    m.copy_from_slice(&required);
+                                }
+                                return Ok(2); // BUFFER_TOO_SMALL
+                            }
+
+                            // Write response to guest buffer
+                            let m = validate_range_mut(&memory, &mut caller, out_ptr, response_len)?;
+                            m.copy_from_slice(response_bytes);
+                            let written = response_len.to_le_bytes();
+                            if let Ok(m) = validate_range_mut(&memory, &mut caller, out_len_ptr, 4) {
+                                m.copy_from_slice(&written);
+                            }
+
+                            Ok(0) // SUCCESS
+                        }
+                        Err(crate::cartridge::CartridgeError::FuelExhausted) => {
+                            // Cartridge burned all its fuel — no refund
+                            Ok(1)
+                        }
+                        Err(crate::cartridge::CartridgeError::MemoryExceeded) => {
+                            Ok(1) // Treat same as fuel exhaustion from parent's perspective
+                        }
+                        Err(crate::cartridge::CartridgeError::CompilationFailed(_)) => {
+                            // Refund the pre-deducted fuel since the cartridge never ran
+                            if let Ok(current) = caller.get_fuel() {
+                                let _ = caller.set_fuel(current + fuel_to_give);
+                            }
+                            Ok(3)
+                        }
+                        Err(crate::cartridge::CartridgeError::InterfaceMismatch(_)) => {
+                            if let Ok(current) = caller.get_fuel() {
+                                let _ = caller.set_fuel(current + fuel_to_give);
+                            }
+                            Ok(4)
+                        }
+                        Err(crate::cartridge::CartridgeError::ExecutionError(_)) => {
+                            Ok(5)
+                        }
+                        Err(crate::cartridge::CartridgeError::RegistryError(_)) => {
+                            if let Ok(current) = caller.get_fuel() {
+                                let _ = caller.set_fuel(current + fuel_to_give);
+                            }
+                            Ok(6)
+                        }
+                    }
+                })
+            },
+        ).map_err(|e| TetError::EngineError(format!("Failed to register trytet::invoke_component: {e:#}")))?;
 
         let instance = linker
             .instantiate_async(&mut store, &module)

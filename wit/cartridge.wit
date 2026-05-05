@@ -1,0 +1,24 @@
+// WIT definition for Trytet Cartridges — the Neuro-Symbolic Interface
+//
+// Phase 33.1: Every "hard logic" module (Z3 solver, Python interpreter,
+// constraint engine) adheres to this single interface. The LLM sends
+// a JSON-encoded plan; the Cartridge returns a JSON-encoded result.
+//
+// This is the canonical contract between "fuzzy" and "deterministic."
+
+package trytet:component;
+
+interface cartridge-v1 {
+    /// The primary entry point for neuro-symbolic tools.
+    ///
+    /// Input:  JSON-encoded payload string (problem specification).
+    /// Output: JSON-encoded result string on success, or error string on failure.
+    ///
+    /// The Host enforces fuel and memory limits externally — the guest
+    /// never needs to worry about resource management.
+    execute: func(input: string) -> result<string, string>;
+}
+
+world tool-guest {
+    export cartridge-v1;
+}

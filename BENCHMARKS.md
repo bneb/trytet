@@ -1,29 +1,26 @@
-# The Northstar Performance Benchmarks
+# Northstar Benchmarks
 
-At Trytet, we formalize the difference between "Dumb Infrastructure" and "Living Intelligence" via the "Sovereign Delta". 
+Built-in benchmark runner. Run `tet metrics`. All metrics use nanosecond-precision monotonic clocks (`std::time::Instant`).
 
-To prove this, `tet-core` has a built-in benchmark runner. Run `tet metrics`. All metrics are evaluated using nanosecond-precision monotonic clocks (`std::time::Instant`) within synchronous contexts.
+## Metrics
 
-## The Metrics
-
-| Metric | Ceiling | Typical Value | What it measures |
+| Metric | Ceiling | Typical | Description |
 |---|---|---|---|
-| **Teleport Warp** | `< 200ms` | `< 2ms` | The time it takes for a full Wasm Agent's VM state buffer to be serialized, transferred from memory, and de-serialized on a foreign machine. |
-| **Mitosis Constant** | `< 15ms` | `< 1ms` | The latency penalty to fork an existing running Agent, resolving internal locks, and deduplicating the VFS copy-on-write pointers. |
-| **Oracle Fidelity** | `< 5ms` | `< 1ms` | The cryptography overhead associated with guaranteeing the Wasm payload originates from an authenticated wallet (e.g. Ed25519 hash validation). |
-| **Market Evacuation** | `< 800ms` | `< 5ms` | The cluster "Thermal Panic Drill" — how quickly an entire slice of nodes can identify an arbitrage opportunity and begin shedding 1,000s of agents to neighbor nodes. |
+| **Teleport Warp** | `< 200ms` | `< 2ms` | Full VM state serialization, transfer, and deserialization on a remote node. |
+| **Mitosis Constant** | `< 15ms` | `< 1ms` | Fork latency. Lock resolution + CoW VFS pointer deduplication. |
+| **Oracle Fidelity** | `< 5ms` | `< 1ms` | Ed25519 payload authentication overhead. |
+| **Market Evacuation** | `< 800ms` | `< 5ms` | Time for a node slice to identify thermal arbitrage and shed agents. |
+| **Cartridge Spin-up** | `< 500µs` | `< 100µs` | Instantiate a cached Wasm Component, call `cartridge-v1`, reclaim memory. Excludes Cranelift compilation. |
 
-## Why it Matters: Docker vs Trytet
+## Context
 
-A Docker container cold-start takes at best ~2 seconds to initialize underlying cgroups, boot the daemon, assign IP configurations, and start execution.
+Docker cold-start: ~2 seconds (cgroups, daemon, IP config, execution).
+Trytet boots and teleports in ~1.5ms. 1000x.
 
-Trytet boots *and teleports* in ~`1.5 milliseconds` — over **1000x faster**. Under extreme thermal or CPU pressure, Trytet shifts its load transparently before the Linux layer ever hits a warning limit.
+## Verify
 
-## Verify Locally
-
-Launch a local cluster and poll the endpoint to witness Trytet's speed:
 ```bash
 curl -X GET http://localhost:3000/v1/swarm/metrics
 ```
 
-Or view the visually enriched gauges directly on your **Console** at `http://localhost:3000/console`.
+Or view the gauges at `http://localhost:3000/console`.

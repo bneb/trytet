@@ -1,33 +1,52 @@
-# API Integration Reference
+# API Reference
 
-The Trytet API drives the `tet` CLI underneath the hood. All requests and responses are heavily reliant on `application/json`.
-By default, the engine binds to `localhost:3000`.
+JSON over HTTP. Default bind: `localhost:3000`.
 
-## Swagger / Core Routes
+## Routes
 
-### Base Operations
-- `GET /health` : Node vital check.
-- `GET /console`: View embedded command center html dashboard.
+### Base
+- `GET /health` : Health check.
+- `GET /console` : Embedded dashboard.
 
 ### Swarm & Metrics
-- `GET /v1/swarm/metrics` : Fetch the Northstar Report (`NorthstarReport`).
-- `GET /v1/swarm/stream` : WebSocket URL. Subscribe to JSON-encoded telemetry events originating from agents.
-- `POST /v1/swarm/up` : Same behavior as `tet up`. Upload a raw Wasm artifact.
-- `GET /v1/topology` : Fetch the topology metrics of agents across nodes. 
+- `GET /v1/swarm/metrics` : Northstar benchmark report.
+- `GET /v1/swarm/stream` : WebSocket telemetry stream.
+- `POST /v1/swarm/up` : Upload a Wasm artifact (equivalent to `tet up`).
+- `GET /v1/topology` : Agent topology across nodes.
 
 ### Agent Lifecycle
-- `POST /v1/tet/execute` : Execute a payload raw.
-- `POST /v1/tet/snapshot/{id}` : Create a point-in-time state artifact. 
-- `POST /v1/tet/fork/{id}` : Duplicate the state artifact and spawn an identical child agent.
+- `POST /v1/tet/execute` : Execute a Wasm payload.
+- `POST /v1/tet/snapshot/{id}` : Point-in-time state snapshot.
+- `POST /v1/tet/fork/{id}` : Fork from snapshot.
 
 ### Gateway & RPC
-- `POST /v1/tet/memory/{id}` : Read memory from a specific Vector File System isolated layer.
-- `POST /v1/tet/infer/{id}` : Post an inference prompt directly via Llama RPC.
+- `POST /v1/tet/memory/{id}` : Read from an agent's VFS layer.
+- `POST /v1/tet/infer/{id}` : Inference prompt via Llama RPC.
+
+### Cartridge Host Functions (Wasm ABI)
+
+Available to guest modules via the `trytet` import namespace. Not HTTP endpoints.
+
+- `trytet::invoke_component(component_id_ptr, component_id_len, payload_ptr, payload_len, fuel, out_ptr, out_len_ptr) -> i32`
+
+  Invoke a pre-compiled Wasm Component by content ID. Runs in an isolated sub-sandbox.
+
+  | Return Code | Meaning |
+  |---|---|
+  | `0` | Success, result written to `out_ptr` |
+  | `1` | Fuel exhausted |
+  | `2` | Buffer too small, required size at `out_len_ptr` |
+  | `3` | Compilation failed |
+  | `4` | Interface mismatch (no `cartridge-v1` export) |
+  | `5` | Execution error (cartridge returned `Err`) |
+  | `6` | Registry error (component ID not found) |
 
 ## Authentication
-By default, Trytet clusters are authenticated via **Ed25519 Wallet Signatures**. Each packet specifies:
-- `pubkey`: The source agent's Ed25519 public key.
-- `signature`: The cryptographic hash of the JSON payload.
 
-## Rate Limits & Meters
-Requests spanning over compute limits trigger an HTTP 402 Payment Required or HTTP 503 if the node has declared itself to be at Thermal Exhaustion. Nodes meter "Fuel" dynamically based on Hive Market Multipliers.
+Ed25519 wallet signatures. Each packet includes:
+- `pubkey`: Source agent's public key.
+- `signature`: Signed hash of the JSON payload.
+
+## Rate Limits
+
+Requests exceeding compute limits receive HTTP 402 or 503 (thermal exhaustion). Fuel is metered per Hive Market multipliers.

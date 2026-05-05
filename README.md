@@ -1,23 +1,23 @@
 # Trytet Engine
 
-> A 150µs cold-start Wasm engine that teleports AI agents.
+> **The optimally solved agentic sandbox.**
 
-Trytet is a deterministic, hyper-ephemeral execution substrate built in Rust. It utilizes WebAssembly to isolate AI agents, snapshot their entire active virtual memory and network state, and instantaneously teleport them across physical nodes or directly into the browser.
+Agents call solvers. Solvers hang. Trytet makes sure the agent doesn't. Deterministic Wasm execution with fuel-bounded traps, live state migration, and $O(1)$ teardown. Rust. Component Model. Sub-200µs cold start.
 
 ![Metrics Console](/Users/kevin/.gemini/antigravity/brain/c52e29ca-54f3-42ee-afee-e01033da222e/console_metrics_final_1775313386849.png)
 
-## The "Why"
+## Why
 
-| Technology | Cold Start | Deterministic Execution | Live Migration | Overhead |
+| Technology | Cold Start | Solver Safety | Live Migration | Per-Agent Overhead |
 |---|---|---|---|---|
-| **Docker/K8s** | 2-5 Seconds | No | Extremely Difficult | Whole OS Stack Layer |
-| **LLM APIs (Cloud)** | Variable / Latent | No | No | N/A |
-| **V8 Isolates** | 5ms | No | No | High Memory Usage |
-| **Trytet (Wasmtime)** | **< 200µs** | **Yes (Fuel Mode)** | **Native (Instant)** | **< 5MB per agent** |
+| **Docker/K8s** | 2-5s | None | Extremely Difficult | Whole OS Stack |
+| **Agent Frameworks** (LangChain, CrewAI) | Variable | None (process-level) | No | Unbounded |
+| **V8 Isolates** | 5ms | None | No | High Memory |
+| **Trytet** | **< 200µs** | **Fuel-bounded traps** | **Native** | **< 5MB** |
 
-## Core Architecture
+## Architecture
 
-Trytet is structured into a multi-layer stack. For a deep technical dive, read the [Architecture Guide](ARCHITECTURE.md).
+Multi-layer stack. Technical details in the [Architecture Guide](ARCHITECTURE.md).
 
 ```mermaid
 graph TD
@@ -34,40 +34,39 @@ graph TD
     style F fill:#ff4466,stroke:#1e1e2e,color:#0a0a0f
 ```
 
-## Features (v31.1)
+## Features (v33.1)
 
-- **Teleportation**: Serialize agent state into an artifact (`.tet`), transfer it over P2P, and instantly revive it.
-- **Copy-on-Write (CoW) VFS**: Agents are natively backed by an isolated Vector File System preventing cross-contamination with sub-1µs memory reads.
-- **Market Scheduling**: An elastic resource market that bids for agents using "Fuel Vouchers" based on Node Thermal Pressure and CPU utilization.
-- **Wasm-Based Determinism**: Bound loop iterations and infinite workloads via strict "Fuel" limits, effectively guaranteeing node stability.
-- **Formally Verified Consensus**: Safely acquire locks over migrating agents.
-- **Northstar Benchmarking**: Highly instrumented telemetry proving sub-millisecond execution.
-- **Prison Break Security**: Hardened execution environments protecting the Host File System via Path Jailing, mitigating memory wrapper vulnerabilities, and strictly pre-empting deep LLM inference loads via Host-level Watchdogs.
+- **Neuro-Symbolic Cartridges**: Load deterministic Wasm Components (solvers, verifiers, constraint engines) into an agent's execution graph. Each cartridge runs in a fuel-bounded sub-sandbox with $O(1)$ teardown. The agent reasons; the cartridge computes.
+- **Teleportation**: Serialize agent state into a `.tet` artifact, transfer over P2P, revive on a remote node.
+- **Copy-on-Write VFS**: Isolated Vector File System with sub-1µs reads and native deduplication on fork.
+- **Market Scheduling**: Elastic resource market. Nodes bid for agent workloads using Fuel Vouchers scaled by thermal pressure and CPU availability.
+- **Fuel Determinism**: Strict instruction-level fuel limits. Infinite loops are trapped, not timed out.
+- **Consensus Locks**: $O(1)$ multi-phase commit prevents double-execution during migration.
+- **Northstar Benchmarks**: Built-in latency instrumentation across five critical paths.
+- **Path Jailing**: Host filesystem isolation, OOB bounds checking, and preemptive watchdogs for inference loads.
 
-## 5-Minute Quickstart
-
-Get agents communicating locally:
+## Quickstart
 
 ```bash
-# Start the Control Plane
-tet metrics
-
-# Boot an agent artifact from a file
+# Boot an agent
 tet up my-agent.tet --fuel 50000
 
-# View real-time cluster map and state
+# View running agents
 tet ps
 
-# Tail the agent's telemetry with icons
+# Tail telemetry
 tet logs -f my-agent
+
+# Run the Northstar benchmark suite
+tet metrics
 ```
 
-Check out the embedded local dashboard directly in your browser: `http://localhost:3000/console`
+Dashboard at `http://localhost:3000/console`.
 
 ## Documentation
 
-- 🏛️ [Architecture Deep-Dive](ARCHITECTURE.md)
-- 🖥️ [CLI Operator's Reference](CLI.md)
-- 🚀 [Northstar Benchmarks](BENCHMARKS.md)
-- 🔌 [API Integration Reference](API.md)
-- 🌍 [Deployment Guide](DEPLOYMENT.md)
+- [Architecture](ARCHITECTURE.md)
+- [CLI Reference](CLI.md)
+- [Benchmarks](BENCHMARKS.md)
+- [API Reference](API.md)
+- [Deployment](DEPLOYMENT.md)

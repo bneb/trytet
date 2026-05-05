@@ -26,6 +26,8 @@ pub mod api;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod benchmarks;
 pub mod builder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cartridge;
 pub mod consensus;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod crypto;

@@ -146,6 +146,10 @@ pub enum TetError {
     /// Neural inference operation failed.
     #[error("Inference error: {0}")]
     InferenceError(String),
+
+    /// Phase 33.1: Cartridge (Component Model) execution failed.
+    #[error("Cartridge error: {0}")]
+    CartridgeError(String),
 }
 
 impl TetError {
@@ -159,6 +163,7 @@ impl TetError {
             TetError::MeshError(_) => 502,       // Bad Gateway pattern
             TetError::CallStackExhausted => 429, // Too many requests/depth
             TetError::InferenceError(_) => 500,
+            TetError::CartridgeError(_) => 422,  // Unprocessable Entity
         }
     }
 }
@@ -180,6 +185,7 @@ impl axum::response::IntoResponse for TetError {
                 TetError::MeshError(_) => "mesh_error",
                 TetError::CallStackExhausted => "call_stack_exhausted",
                 TetError::InferenceError(_) => "inference_error",
+                TetError::CartridgeError(_) => "cartridge_error",
             }
         });
 

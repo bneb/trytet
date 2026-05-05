@@ -34,8 +34,8 @@ snow = "0.9.6"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-wasmtime = "43"
-wasmtime-wasi = "43"
+wasmtime = { version = "43", features = ["component-model"] }
+wasmtime-wasi = { version = "43", features = ["component-model"] }
 toml = "0.8.19"
 tempfile = "3.27.0"
 tar = "0.4.45"
