@@ -1,0 +1,17 @@
+[package]
+name = "python-evaluator"
+version = "0.1.0"
+edition = "2021"
+description = "Trytet Python Evaluator Cartridge"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rustpython-vm = { version = "0.3.1", default-features = false, features = ["compiler"] }
+wit-bindgen = "0.24.0"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
