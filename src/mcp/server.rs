@@ -23,8 +23,32 @@ impl McpServer {
 
         loop {
             line.clear();
-            let bytes_read = reader.read_line(&mut line).await?;
-            if bytes_read == 0 {
+            let mut newline_found = false;
+            let mut total_read = 0;
+
+            while !newline_found {
+                let buf = reader.fill_buf().await?;
+                if buf.is_empty() {
+                    break;
+                }
+
+                let (consume_len, is_newline) = match buf.iter().position(|&b| b == b'\n') {
+                    Some(i) => (i + 1, true),
+                    None => (buf.len(), false),
+                };
+
+                let chunk_str = String::from_utf8_lossy(&buf[..consume_len]);
+                line.push_str(&chunk_str);
+                reader.consume(consume_len);
+                total_read += consume_len;
+                newline_found = is_newline;
+
+                if line.len() > 10 * 1024 * 1024 { // 10MB limit
+                    return Err(anyhow::anyhow!("MCP Payload exceeded 10MB limit"));
+                }
+            }
+
+            if total_read == 0 && line.is_empty() {
                 break; // EOF
             }
 

@@ -123,6 +123,22 @@ enum Commands {
     Metrics,
     /// Start the Trytet MCP (Model Context Protocol) Server over stdio
     Mcp,
+    /// Time-Travel Replay Debugger: Download a crashed state snapshot and replay deterministically
+    Replay {
+        /// The snapshot ID to pull and replay
+        snapshot_id: String,
+        /// The payload to evaluate upon resuming the state
+        #[arg(short, long)]
+        payload: Option<String>,
+    },
+    /// Bring Your Own Language (BYOL) Build Pipeline: Compile TS/JS to a Trytet Agent
+    Build {
+        /// Path to the TypeScript or JavaScript entry point
+        entry: std::path::PathBuf,
+        /// Output .tet Wasm artifact path
+        #[arg(short, long)]
+        out: std::path::PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -160,5 +176,7 @@ async fn main() -> Result<()> {
         Commands::Logs { alias } => tet_cli::status::logs_cmd(&client, alias.as_deref(), cli.json).await,
         Commands::Metrics => tet_cli::status::metrics_cmd(&client, cli.json).await,
         Commands::Mcp => tet_cli::mcp::mcp_cmd().await,
+        Commands::Replay { snapshot_id, payload } => tet_cli::run::replay_cmd(&client, snapshot_id, payload.as_deref()).await,
+        Commands::Build { entry, out } => tet_cli::run::build_cmd(entry, out).await,
     }
 }

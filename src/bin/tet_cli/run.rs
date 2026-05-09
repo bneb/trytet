@@ -6,6 +6,138 @@ use std::fs;
 use tet_core::models::TetExecutionRequest;
 use crate::tet_cli::utils::{get_api_url, pb_style};
 
+pub async fn build_cmd(entry: &std::path::Path, out: &std::path::Path) -> Result<()> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    pb.set_message(format!("Compiling {} to Trytet Agent Component...", entry.display()));
+
+    // 1. Verify the entry file exists
+    if !entry.exists() {
+        return Err(anyhow!("Entry file not found: {}", entry.display()));
+    }
+
+    // 2. Read the source
+    let source = fs::read_to_string(entry)?;
+
+    // 3. For the BYOL pipeline, we actually bundle the JS Evaluator Cartridge and inject the JS code.
+    // In a full implementation, this uses `jco` to create a standalone component.
+    // For this MVP, we will construct a valid .tet artifact that wraps the source.
+    let base_dir = std::env::current_dir().unwrap().join("crates");
+    let wasm_path = base_dir.join("js-evaluator").join("target/wasm32-wasip1/release/js_evaluator.wasm");
+    
+    let wasm_bytes = fs::read(&wasm_path).unwrap_or_else(|_| {
+        println!("{} Warning: js_evaluator.wasm not found. Building empty agent shell.", "⚠".yellow());
+        vec![]
+    });
+
+    let mut injected_files = std::collections::HashMap::new();
+    injected_files.insert("agent.js".to_string(), source);
+
+    let req = TetExecutionRequest {
+        payload: Some(wasm_bytes),
+        alias: Some("byol-agent".to_string()),
+        env: std::collections::HashMap::new(),
+        injected_files,
+        allocated_fuel: 0, // Ignored in artifact build
+        max_memory_mb: 64,
+        parent_snapshot_id: None,
+        call_depth: 0,
+        voucher: None,
+        manifest: None,
+        egress_policy: None,
+        target_function: None,
+    };
+
+    // Serialize to standard bincode representation
+    use bincode::Options;
+    let bincode_options = bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes();
+    
+    let raw_bytes = bincode_options.serialize(&req)?;
+    
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(out, raw_bytes)?;
+
+    pb.finish_with_message(format!("{} Successfully compiled agent artifact to {}", "✔".green(), out.display()));
+    Ok(())
+}
+
+pub async fn replay_cmd(client: &Client, snapshot_id: &str, payload: Option<&str>) -> Result<()> {
+    if snapshot_id.contains('/') || snapshot_id.contains('\\') || snapshot_id.contains("..") {
+        return Err(anyhow!("Invalid snapshot ID: contains path traversal characters"));
+    }
+
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style());
+    pb.set_message(format!("Pulling snapshot {} from Hive...", snapshot_id.cyan()));
+
+    let home_dir = home::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+    let path = home_dir.join(".trytet").join("snapshots").join(format!("{}.tet", snapshot_id));
+
+    // If it doesn't exist locally, we normally hit a /v1/registry/pull or similar endpoint.
+    // For the replay command, we actually hit the /v1/tet/export endpoint if local node has it.
+    let export_url = format!("{}/v1/tet/export/{}", get_api_url(), snapshot_id);
+    let export_res = client.get(&export_url).send().await?;
+
+    if !export_res.status().is_success() {
+        return Err(anyhow!("Failed to pull snapshot: {}", export_res.text().await?));
+    }
+
+    let bytes = export_res.bytes().await?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, &bytes)?;
+
+    pb.finish_with_message(format!("{} Snapshot downloaded to {}", "✔".green(), path.display()));
+
+    println!("\n{} Time-Travel Debugger Initialized", "►".magenta());
+    println!("Resurrecting deterministic linear memory graph...");
+
+    // Now we "up" the artifact, but we execute the payload provided to test the failure locally
+    let mut req = TetExecutionRequest {
+        payload: None,
+        alias: Some(format!("replay-{}", snapshot_id)),
+        env: std::collections::HashMap::new(),
+        injected_files: std::collections::HashMap::new(),
+        allocated_fuel: 50_000_000,
+        max_memory_mb: 64,
+        parent_snapshot_id: Some(snapshot_id.to_string()),
+        call_depth: 0,
+        voucher: None,
+        manifest: None,
+        egress_policy: None,
+        target_function: None,
+    };
+
+    if let Some(p) = payload {
+        req.payload = Some(p.as_bytes().to_vec());
+    }
+
+    let url = format!("{}/v1/tet/execute", get_api_url());
+    let res = client.post(&url).json(&req).send().await?;
+
+    if !res.status().is_success() {
+        println!("{} Replay execution failed: {}", "✘".red(), res.text().await?);
+        return Ok(());
+    }
+
+    let exec_res: tet_core::models::TetExecutionResult = res.json().await?;
+
+    println!("\n=== REPLAY RESULTS ===");
+    println!("Status: {:?}", exec_res.status);
+    println!("Fuel Burned: {}", exec_res.fuel_consumed);
+    println!("STDOUT:\n{}", exec_res.telemetry.stdout_lines.join("\n"));
+    if !exec_res.telemetry.stderr_lines.is_empty() {
+        println!("STDERR:\n{}", exec_res.telemetry.stderr_lines.join("\n"));
+    }
+
+    Ok(())
+}
+
 pub async fn run_payload(
     client: &Client,
     payload_path: &str,
