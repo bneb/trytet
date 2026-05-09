@@ -65,6 +65,7 @@ Dashboard at `http://localhost:3000/console`.
 
 ## Documentation
 
+- **[Product Vision (The Manifesto)](VISION.md)**
 - [Architecture](ARCHITECTURE.md)
 - [CLI Reference](CLI.md)
 - [Benchmarks](BENCHMARKS.md)

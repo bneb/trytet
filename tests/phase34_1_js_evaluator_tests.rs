@@ -113,7 +113,7 @@ fn test_js_evaluator_memory_exhaustion() {
 
     // Assert: Must trap due to memory allocation failure
     match result {
-        Err(CartridgeError::MemoryExceeded) | Err(CartridgeError::ExecutionError(_)) => {
+        Err(CartridgeError::MemoryExceeded) | Err(CartridgeError::ExecutionError(..)) => {
             // Depending on how Boa engine handles allocation failures in Wasm,
             // it may either hit the Wasmtime memory limit directly, or throw an internal error.
             // Both mean the host survived safely.

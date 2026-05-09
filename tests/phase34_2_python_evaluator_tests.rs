@@ -104,7 +104,7 @@ fn test_python_evaluator_memory_exhaustion() {
 
     // Assert: Must trap due to memory allocation failure
     match result {
-        Err(CartridgeError::MemoryExceeded) | Err(CartridgeError::ExecutionError(_)) => {
+        Err(CartridgeError::MemoryExceeded) | Err(CartridgeError::ExecutionError(..)) => {
             eprintln!("Python Evaluator correctly trapped memory bomb.");
         }
         Ok(_) => panic!("Expected Python evaluator to trap on memory bomb, but it succeeded!"),

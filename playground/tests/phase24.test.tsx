@@ -18,7 +18,13 @@ const TestComponent = () => {
 };
 
 describe('Phase 24: The Pulse Test', () => {
-    let mockWebSocket: any;
+    let mockWebSocket: {
+        send: ReturnType<typeof vi.fn>;
+        close: ReturnType<typeof vi.fn>;
+        onmessage: ((ev: MessageEvent) => void) | null;
+        onopen: (() => void) | null;
+        onclose: (() => void) | null;
+    };
 
     beforeEach(() => {
         mockWebSocket = {
@@ -32,7 +38,7 @@ describe('Phase 24: The Pulse Test', () => {
             constructor() {
                 return mockWebSocket;
             }
-        } as any;
+        } as unknown as typeof WebSocket;
     });
 
     it('renders a new connection line within 16ms upon receiving a frame', async () => {

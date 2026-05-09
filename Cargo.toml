@@ -51,6 +51,7 @@ llama-cpp-2 = { version = "0.1.140", features = ["metal"] }
 futures-util = "0.3.30"
 ratatui = "0.30.0"
 crossterm = "0.29.0"
+tower-http = { version = "0.6", features = ["cors"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

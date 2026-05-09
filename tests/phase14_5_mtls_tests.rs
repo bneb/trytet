@@ -70,7 +70,7 @@ async fn test_untrusted_peer_rejected() {
         create_secure_hive_client(trusted_roots, Some((rogue_cert_chain, rogue_key))).unwrap();
 
     // 4. Client attempts to connect
-    let cmd = HiveCommand::Pulse;
+    let cmd = HiveCommand::Network(tet_core::hive::HiveNetworkCommand::Pulse);
     let target_addr = format!("127.0.0.1:{}", target_port);
 
     let result =

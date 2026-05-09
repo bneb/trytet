@@ -21,6 +21,18 @@ pub struct SovereignTunnel {
 }
 
 impl SovereignTunnel {
+    pub fn init_initiator_nn() -> Result<Self, TunnelError> {
+        let builder = Builder::new("Noise_NN_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
+        let handshake = builder.build_initiator()?;
+        Ok(Self { noise_state: Some(handshake), transport: None, transfer_count: 0 })
+    }
+
+    pub fn init_responder_nn() -> Result<Self, TunnelError> {
+        let builder = Builder::new("Noise_NN_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
+        let handshake = builder.build_responder()?;
+        Ok(Self { noise_state: Some(handshake), transport: None, transfer_count: 0 })
+    }
+
     pub fn init_initiator(local_secret: &[u8], remote_pubkey: &[u8]) -> Result<Self, TunnelError> {
         let builder = Builder::new("Noise_IK_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
         let mut key = [0u8; 32];
@@ -59,12 +71,12 @@ impl SovereignTunnel {
         if self.transfer_count > 1_000_000_000 {
             return Err(TunnelError::RekeyRequired);
         }
-        
-        let mut final_out = Vec::new();
+
         let chunk_size = 65000;
-        
+        let mut final_out = Vec::with_capacity(payload.len() + (payload.len() / chunk_size + 1) * 20);
+        let mut out = vec![0u8; chunk_size + 1024];
+
         for chunk in payload.chunks(chunk_size) {
-            let mut out = vec![0u8; chunk.len() + 1024]; 
             let len = if let Some(transport) = &mut self.transport {
                 transport.write_message(chunk, &mut out)?
             } else if let Some(noise) = &mut self.noise_state {
@@ -72,11 +84,11 @@ impl SovereignTunnel {
             } else {
                 return Err(TunnelError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "Tunnel not initialized")));
             };
-            
+
             final_out.extend_from_slice(&(len as u32).to_be_bytes());
             final_out.extend_from_slice(&out[..len]);
         }
-        
+
         Ok(final_out)
     }
 

@@ -14,6 +14,7 @@ use axum::{
     routing::post,
     Json, Router,
 };
+use tower_http::cors::CorsLayer;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -71,6 +72,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/tet/teleport/{alias}", post(handle_teleport))
         .route("/v1/swarm/stream", axum::routing::get(handle_ws_stream))
         .route("/v1/tet/topup", post(handle_topup))
+        .route("/v1/cartridge/invoke", post(handle_cartridge_invoke))
+        .route("/v1/benchmark/node", post(handle_node_benchmark))
         .route("/v1/ingress/register", post(handle_ingress_register))
         .route("/ingress/{*path}", axum::routing::any(handle_ingress_proxy))
         .route("/v1/tet/memory/{alias}", post(handle_memory_query))
@@ -86,6 +89,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             axum::routing::get(crate::server::health::handle_health),
         )
         .route("/console", axum::routing::get(console::serve_console_page))
+        .layer(
+            CorsLayer::permissive()
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024 * 50)) // 50MB limit
         .with_state(state)
 }
@@ -141,6 +147,119 @@ async fn handle_topup(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to resuscitate top-up snapshot: {e}"),
         )),
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct CartridgeInvokeRequest {
+    pub cartridge_id: String,
+    pub payload: String,
+    pub fuel_limit: u64,
+    pub memory_limit_mb: u64,
+}
+
+async fn handle_cartridge_invoke(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CartridgeInvokeRequest>,
+) -> Result<impl IntoResponse, impl IntoResponse> {
+    // Phase 33.1: Direct Host-to-Cartridge Bridge
+    // We use the sandbox's internal cartridge manager to bypass agent overhead for benchmarks.
+    let (output, metrics, status) = match state.sandbox.send_mesh_call(crate::models::MeshCallRequest {
+        target_alias: req.cartridge_id.clone(),
+        method: "execute".to_string(),
+        payload: req.payload.as_bytes().to_vec(),
+        fuel_to_transfer: req.fuel_limit,
+        current_depth: 0,
+        target_function: Some("trytet:component/cartridge-v1#execute".to_string()),
+    }).await {
+        Ok(res) => {
+            // Unpack MeshCallResponse
+            (String::from_utf8_lossy(&res.return_data).to_string(), res.fuel_used, res.status)
+        },
+        Err(e) => {
+             return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": e.to_string(),
+                    "status": "Error"
+                })),
+            ));
+        }
+    };
+
+    Ok((StatusCode::OK, Json(serde_json::json!({
+        "output": output,
+        "fuel_consumed": metrics,
+        "status": status
+    }))))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct NodeBenchmarkRequest {
+    pub snippet: String,
+    pub timeout_ms: u64,
+}
+
+async fn handle_node_benchmark(
+    Json(req): Json<NodeBenchmarkRequest>,
+) -> Response {
+    // Phase 36: Standard Node.js VM Simulation
+    // Spawns a real Node process to evaluate the snippet with a wall-clock timeout.
+    
+    let start = std::time::Instant::now();
+    
+    // We use a small JS wrapper to evaluate the code and print the result
+    let script = format!(
+        "try {{ const res = eval({}); console.log(JSON.stringify({{ status: 'Success', result: String(res) }})); }} catch(e) {{ console.log(JSON.stringify({{ status: 'Error', error: e.message }})); }}",
+        serde_json::to_string(&req.snippet).unwrap_or_default()
+    );
+
+    let mut child = match tokio::process::Command::new("node")
+        .arg("-e")
+        .arg(script)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn() {
+            Ok(c) => c,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to spawn node: {e}")).into_response()
+        };
+
+    // Standard wall-clock timeout
+    let timeout = tokio::time::sleep(std::time::Duration::from_millis(req.timeout_ms));
+    
+    tokio::select! {
+        _ = timeout => {
+            let _ = child.kill().await;
+            (StatusCode::OK, Json(serde_json::json!({
+                "status": "Timeout",
+                "duration_ms": start.elapsed().as_millis(),
+                "output": "Script execution timed out after wall-clock limit"
+            }))).into_response()
+        }
+        status = child.wait() => {
+            let duration_ms = start.elapsed().as_millis();
+            let output = match child.wait_with_output().await {
+                Ok(o) => o,
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            
+            if status.is_ok() && !stdout.is_empty() {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                     return (StatusCode::OK, Json(serde_json::json!({
+                        "status": parsed["status"],
+                        "duration_ms": duration_ms,
+                        "output": parsed["result"].as_str().or(parsed["error"].as_str()).unwrap_or("Unknown")
+                    }))).into_response();
+                }
+            }
+            
+            (StatusCode::OK, Json(serde_json::json!({
+                "status": "Error",
+                "duration_ms": duration_ms,
+                "output": String::from_utf8_lossy(&output.stderr).to_string()
+            }))).into_response()
+        }
     }
 }
 

@@ -21,3 +21,4 @@ mod sandbox_polyfill;
 pub use sandbox_polyfill::*;
 
 pub mod security;
+pub mod host_api;

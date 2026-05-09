@@ -1,0 +1,19 @@
+[package]
+name = "sat-cartridge"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+varisat = "0.2"
+varisat-dimacs = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.24.0"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

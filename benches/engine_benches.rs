@@ -117,7 +117,7 @@ fn bench_vector_vfs(c: &mut Criterion) {
     group.sample_size(10);
     let rt = Runtime::new().unwrap();
 
-    let db = Arc::new(VectorVfs::new());
+    let db = rt.block_on(async { Arc::new(VectorVfs::new()) });
 
     for size in [20, 80, 320].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &scale| {

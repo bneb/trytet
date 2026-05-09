@@ -1,4 +1,4 @@
-use tet_core::sandbox::security::{PathJailer, SecurityError, Watchdog};
+use tet_core::sandbox::security::{PathJailer, SecurityError};
 use tet_core::sandbox::WasmtimeSandbox;
 use tet_core::mesh::TetMesh;
 use tet_core::economy::VoucherManager;
@@ -6,7 +6,6 @@ use tet_core::hive::HivePeers;
 use tet_core::models::TetExecutionRequest;
 use std::sync::Arc;
 use std::path::PathBuf;
-use std::time::Duration;
 
 #[tokio::test]
 async fn test_path_traversal_jail() {

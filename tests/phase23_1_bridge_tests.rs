@@ -103,7 +103,7 @@ async fn test_phase23_atomic_burn_with_withdraw() {
         agent_signature: vec![1, 2, 3],
     };
 
-    let cmd = HiveCommand::WithdrawalPending(intent);
+    let cmd = HiveCommand::Economy(tet_core::hive::HiveEconomyCommand::WithdrawalPending(intent));
 
-    assert!(matches!(cmd, HiveCommand::WithdrawalPending(ref i) if i.internal_fuel == 500_000));
+    assert!(matches!(cmd, HiveCommand::Economy(tet_core::hive::HiveEconomyCommand::WithdrawalPending(ref i)) if i.internal_fuel == 500_000));
 }

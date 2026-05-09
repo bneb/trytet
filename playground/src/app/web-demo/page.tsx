@@ -42,11 +42,12 @@ interface Snapshot {
     blobPreview: string;    // Hex preview of first 32 bytes
     sha256: string;         // SHA-256 of the bincode blob (via SubtleCrypto)
     stateSize: number;      // Pre-serialization state size (JSON bytes)
+    _blob?: Uint8Array;     // The actual bincode blob
 }
 
 // Wasm engine reference (loaded lazily)
-let wasmEngine: any = null;
-let wasmInit: any = null;
+let wasmEngine: unknown = null;
+let wasmInit: unknown = null;
 
 // ============================================================
 // STRATEGY ENGINE
@@ -211,7 +212,7 @@ export default function WebDemoPage() {
             sha256: '', stateSize: stateBytes.length,
         };
 
-        (snap as any)._blob = bincodeBlob;
+        snap._blob = bincodeBlob;
 
         // Compute SHA-256 asynchronously
         if (bincodeBlob) {
@@ -234,15 +235,16 @@ export default function WebDemoPage() {
         let restoredAgents = snap.agents.map(a => ({ ...a, moveHistory: [...a.moveHistory] }));
 
         // If we have the real bincode blob, prove round-trip through Wasm
-        if (wasmEngine && (snap as any)._blob) {
+        if (wasmEngine && snap._blob) {
             const t0 = performance.now();
             try {
-                const restoredBytes = wasmEngine.restore_state((snap as any)._blob);
+                const engine = wasmEngine as { restore_state: (b: Uint8Array) => Uint8Array };
+                const restoredBytes = engine.restore_state(snap._blob);
                 const restoredJson = new TextDecoder().decode(restoredBytes);
                 const parsed = JSON.parse(restoredJson);
                 restoredAgents = parsed.agents;
                 const restoreMs = performance.now() - t0;
-                console.log(`[TRYTET] Restored from bincode in ${restoreMs.toFixed(3)}ms (${(snap as any)._blob.length} bytes)`);
+                console.log(`[TRYTET] Restored from bincode in ${restoreMs.toFixed(3)}ms (${snap._blob.length} bytes)`);
             } catch (e) {
                 console.error('Wasm restore failed, using JS fallback:', e);
             }

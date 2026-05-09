@@ -8,6 +8,12 @@
 
 package trytet:component;
 
+interface host-api {
+    /// Perform an HTTP GET request to the specified URL.
+    /// Fuel cost is charged based on response size.
+    fetch: func(url: string) -> result<string, string>;
+}
+
 interface cartridge-v1 {
     /// The primary entry point for neuro-symbolic tools.
     ///
@@ -20,5 +26,6 @@ interface cartridge-v1 {
 }
 
 world tool-guest {
+    import host-api;
     export cartridge-v1;
 }

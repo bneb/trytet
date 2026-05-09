@@ -7,6 +7,34 @@ pub struct AgentWallet {
 }
 
 impl AgentWallet {
+    pub fn x25519_keypair() -> anyhow::Result<([u8; 32], [u8; 32])> {
+        let home = home::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let trytet_dir = home.join(".trytet");
+        std::fs::create_dir_all(&trytet_dir)?;
+        let priv_path = trytet_dir.join("wallet_x25519_priv.dat");
+        let pub_path = trytet_dir.join("wallet_x25519_pub.dat");
+        
+        if priv_path.exists() && pub_path.exists() {
+            let priv_key = std::fs::read(&priv_path)?;
+            let pub_key = std::fs::read(&pub_path)?;
+            let mut priv_arr = [0u8; 32];
+            let mut pub_arr = [0u8; 32];
+            priv_arr.copy_from_slice(&priv_key[..32]);
+            pub_arr.copy_from_slice(&pub_key[..32]);
+            Ok((priv_arr, pub_arr))
+        } else {
+            let builder = snow::Builder::new("Noise_IK_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
+            let kp = builder.generate_keypair()?;
+            std::fs::write(&priv_path, &kp.private)?;
+            std::fs::write(&pub_path, &kp.public)?;
+            let mut priv_arr = [0u8; 32];
+            let mut pub_arr = [0u8; 32];
+            priv_arr.copy_from_slice(&kp.private[..32]);
+            pub_arr.copy_from_slice(&kp.public[..32]);
+            Ok((priv_arr, pub_arr))
+        }
+    }
+
     pub fn load_or_create() -> anyhow::Result<Self> {
         let home_dir = home::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let trytet_dir = home_dir.join(".trytet");

@@ -65,6 +65,15 @@ export function Navbar() {
           <Link href="/web-demo" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
             Live Demo
           </Link>
+          <Link href="/benchmark" className="text-sm font-semibold tracking-wide text-[var(--electric-blue)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] transition-colors">
+            Benchmark
+          </Link>
+          <Link href="/uncrashable" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
+            Uncrashable
+          </Link>
+          <Link href="/dashboard" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
+            Dashboard
+          </Link>
           <a href="https://github.com/bneb/trytet" target="_blank" rel="noreferrer" className="text-sm font-semibold tracking-wide text-[var(--text-sub)] px-3 py-1.5 rounded-md hover:bg-[var(--card-border)] hover:text-[var(--text-main)] transition-colors">
             GitHub
           </a>

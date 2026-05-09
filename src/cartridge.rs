@@ -62,7 +62,7 @@ pub enum CartridgeError {
 
     /// The cartridge's `execute` function returned an error result.
     #[error("Cartridge execution error: {0}")]
-    ExecutionError(String),
+    ExecutionError(String, u64),
 
     /// Failed to resolve the cartridge from the registry.
     #[error("Cartridge registry error: {0}")]
@@ -196,13 +196,38 @@ impl CartridgeManager {
         store.limiter(|s| &mut s.limits);
         store
             .set_fuel(fuel)
-            .map_err(|e| CartridgeError::ExecutionError(format!("Failed to set fuel: {e}")))?;
+            .map_err(|e| CartridgeError::ExecutionError(format!("Failed to set fuel: {e}"), 0))?;
 
         // 3. Create a component Linker and add WASI (empty standard environment)
         let mut linker: Linker<CartridgeState> = Linker::new(&self.engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker).unwrap_or_else(|e| {
             tracing::warn!("Failed to add WASI to cartridge linker: {}", e);
         });
+
+        // Add trytet:component/host-api
+        let mut host_api = linker.instance("trytet:component/host-api").map_err(|e| {
+            CartridgeError::ExecutionError(format!("Failed to create host-api instance: {e}"), 0)
+        })?;
+        
+        host_api.func_wrap("fetch", |mut caller: wasmtime::StoreContextMut<'_, CartridgeState>, params: (String,)| -> wasmtime::Result<(Result<String, String>,)> {
+            let (url,) = params;
+            
+            // Capability check - in production we'd use caller.data().manifest
+            // For now, basic fuel check
+            let max_fuel = caller.get_fuel().unwrap_or(0);
+            if 5000 > max_fuel {
+                return Ok((Err("FuelExhausted".to_string()),));
+            }
+            let _ = caller.set_fuel(max_fuel - 5000);
+            
+            if url.starts_with("http") {
+                // In testing/simulation we return a mock payload to avoid real network boundaries.
+                // In production, this would use reqwest::blocking::get
+                Ok((Ok(format!("MOCK_FETCH_RESULT: {}", url)),))
+            } else {
+                Ok((Err("Unsupported protocol".to_string()),))
+            }
+        }).map_err(|e| CartridgeError::ExecutionError(format!("Failed to register fetch: {e}"), 0))?;
 
         // 4. Instantiate the component
         let instance = linker
@@ -262,24 +287,26 @@ impl CartridgeManager {
                             Err(CartridgeError::ExecutionError(format!(
                                 "Expected string in Ok variant, got: {:?}",
                                 inner
-                            )))
+                            ), fuel_consumed))
                         }
                     }
                     Val::Result(Ok(None)) => Err(CartridgeError::ExecutionError(
                         "Cartridge returned Ok with no value".to_string(),
+                        fuel_consumed,
                     )),
                     Val::Result(Err(Some(inner))) => {
                         if let Val::String(e) = inner.as_ref() {
-                            Err(CartridgeError::ExecutionError(e.to_string()))
+                            Err(CartridgeError::ExecutionError(e.to_string(), fuel_consumed))
                         } else {
                             Err(CartridgeError::ExecutionError(format!(
                                 "Cartridge returned error: {:?}",
                                 inner
-                            )))
+                            ), fuel_consumed))
                         }
                     }
                     Val::Result(Err(None)) => Err(CartridgeError::ExecutionError(
                         "Cartridge returned Err with no value".to_string(),
+                        fuel_consumed,
                     )),
                     Val::String(s) => {
                         // Some component models flatten result<string, string> to string
@@ -336,5 +363,5 @@ fn classify_cartridge_trap(error: &wasmtime::Error) -> CartridgeError {
         return CartridgeError::MemoryExceeded;
     }
 
-    CartridgeError::ExecutionError(message)
+    CartridgeError::ExecutionError(message, 0)
 }

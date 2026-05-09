@@ -1,16 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 
 function mockWorker() {
-    let onmessage: any = null;
+    let onmessage: ((e: MessageEvent) => void) | null = null;
     return {
-        postMessage: (msg: any) => {
+        postMessage: (msg: { type: string; payload?: unknown }) => {
             if (msg.type === 'HYDRATE') {
                 if (onmessage) {
-                    onmessage({ data: { type: 'LOG', data: 'RESURRECTED: agent pre-migration state' } });
+                    onmessage({ data: { type: 'LOG', data: 'RESURRECTED: agent pre-migration state' } } as MessageEvent);
                 }
             }
         },
-        set onmessage(fn: any) {
+        set onmessage(fn: (e: MessageEvent) => void) {
             onmessage = fn;
         },
         terminate: vi.fn(),
@@ -22,7 +22,7 @@ describe('Phase 25: The Resurrection', () => {
         const worker = mockWorker();
         let loggedMessage = '';
 
-        worker.onmessage = (e: any) => {
+        worker.onmessage = (e: MessageEvent) => {
             if (e.data.type === 'LOG') {
                 loggedMessage = e.data.data;
             }

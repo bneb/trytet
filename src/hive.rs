@@ -34,19 +34,16 @@ pub mod link;
 pub mod security;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum HiveCommand {
+pub enum HiveNetworkCommand {
     Join(HiveNodeIdentity),
     Heartbeat(crate::network::vitality::Heartbeat),
     Pulse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HiveDhtCommand {
     ResolveAlias(String),
     ResolveAliasResponse(Option<crate::models::TetMetadata>),
-    MigrateRequest(Box<TeleportationEnvelope>),
-    MigrationPacket(link::MigrationPacket),
-    MigrationNotice {
-        reference: String,
-        manifest: crate::models::manifest::AgentManifest,
-        snapshot_id: String,
-    },
     DhtUpdate {
         alias: String,
         node_ip: String,
@@ -54,12 +51,27 @@ pub enum HiveCommand {
     },
     ProposeAlias(crate::consensus::AliasProposal),
     QuorumVote(crate::consensus::NodeSignature),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HiveMigrationCommand {
+    MigrateRequest(Box<TeleportationEnvelope>),
+    MigrationPacket(link::MigrationPacket),
+    MigrationNotice {
+        reference: String,
+        manifest: crate::models::manifest::AgentManifest,
+        snapshot_id: String,
+    },
     TransitLock {
         alias: String,
         node_id: String,
         ttl_seconds: u64,
     },
     TransitRelease(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HiveEconomyCommand {
     TransferCredit(crate::economy::registry::FuelTransaction),
     BillRequest {
         source_alias: String,
@@ -68,9 +80,22 @@ pub enum HiveCommand {
     },
     WithdrawalPending(crate::economy::bridge::BridgeIntent),
     MarketBidPacket(crate::market::MarketBid),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HiveRegistryCommand {
     RegistryQuery(String),
     RegistryQueryResponse { cid: String, available: bool },
     ChunkStream { cid: String, seq: u32, chunk: Vec<u8> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HiveCommand {
+    Network(HiveNetworkCommand),
+    Dht(HiveDhtCommand),
+    Migration(HiveMigrationCommand),
+    Economy(HiveEconomyCommand),
+    Registry(HiveRegistryCommand),
 }
 
 /// The local registry of known Hive peers.
@@ -216,12 +241,10 @@ impl HiveServer {
         vitality_manager: Arc<crate::network::vitality::VitalityManager>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::network::tunnel::SovereignTunnel;
-        use crate::crypto::AgentWallet;
-        let local_secret = AgentWallet::load_or_create()?.inner_secret_bytes();
-        let expected_remote = [0u8; 32];
-        let mut tunnel = SovereignTunnel::init_responder(&local_secret, &expected_remote)?;
         
-        info!("Upgrading to Noise IK SovereignTunnel.");
+        let mut tunnel = SovereignTunnel::init_responder_nn()?;
+        
+        info!("Upgrading to Noise NN SovereignTunnel.");
         // Noise IK Handshake Responder
         let mut len_buf = [0u8; 4];
         socket.read_exact(&mut len_buf).await?;
@@ -230,13 +253,13 @@ impl HiveServer {
         socket.read_exact(&mut req_payload).await?;
 
         let mut rx_buf = vec![0u8; 65535];
-        tunnel.noise_state.as_mut().unwrap().read_message(&req_payload, &mut rx_buf)?;
+        tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.read_message(&req_payload, &mut rx_buf).map_err(|e| anyhow::anyhow!("Handshake Part 1 Error: {}", e))?;
 
         let mut ix_buf = vec![0u8; 65535];
-        let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+        let len = tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.write_message(&[], &mut ix_buf)?;
         socket.write_all(&(len as u32).to_be_bytes()).await?;
         socket.write_all(&ix_buf[..len]).await?;
-        
+
         tunnel.to_transport()?;
 
         // Read 4-byte length prefix for Ciphertext
@@ -252,42 +275,41 @@ impl HiveServer {
         let mut payload = vec![0u8; len];
         socket.read_exact(&mut payload).await?;
 
-        let command = tunnel.decrypt_payload(&payload)?;
-
+        let command = tunnel.decrypt_payload(&payload).map_err(|e| anyhow::anyhow!("Payload Decrypt Error: {}", e))?;
         match command {
-            HiveCommand::Join(identity) => {
+            HiveCommand::Network(HiveNetworkCommand::Join(identity)) => {
                 info!(
                     "Hive Node joined: {} ({})",
                     identity.node_id, identity.public_addr
                 );
                 peers.add_peer(identity).await;
                 // Send an Ack
-                let enc = tunnel.encrypt_command(&HiveCommand::Pulse)?;
+                let enc = tunnel.encrypt_command(&HiveCommand::Network(HiveNetworkCommand::Pulse))?;
                 socket.write_all(&(enc.len() as u32).to_be_bytes()).await?;
                 socket.write_all(&enc).await?;
             }
-            HiveCommand::Heartbeat(hb) => {
+            HiveCommand::Network(HiveNetworkCommand::Heartbeat(hb)) => {
                 vitality_manager.record_heartbeat(hb);
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::Pulse => {
+            HiveCommand::Network(HiveNetworkCommand::Pulse) => {
                 // Sent back to keep connection alive
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::ResolveAlias(alias) => {
+            HiveCommand::Dht(HiveDhtCommand::ResolveAlias(alias)) => {
                 // Return our local TetMetadata if we have it!
                 let local_meta = mesh.resolve_local(&alias).await;
-                let response = HiveCommand::ResolveAliasResponse(local_meta);
+                let response = HiveCommand::Dht(HiveDhtCommand::ResolveAliasResponse(local_meta));
                 let response_bytes = bincode::serialize(&response)?;
                 let res_len = response_bytes.len() as u32;
                 socket.write_all(&res_len.to_be_bytes()).await?;
                 socket.write_all(&response_bytes).await?;
             }
-            HiveCommand::ResolveAliasResponse(_) => {
+            HiveCommand::Dht(HiveDhtCommand::ResolveAliasResponse(_)) => {
                 // Used by client mapping
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::MigrateRequest(envelope_box) => {
+            HiveCommand::Migration(HiveMigrationCommand::MigrateRequest(envelope_box)) => {
                 let envelope = *envelope_box;
                 info!(
                     "Received Live Migration: Tet {}",
@@ -327,15 +349,15 @@ impl HiveServer {
                     }
                 }
             }
-            HiveCommand::MigrationPacket(packet) => {
+            HiveCommand::Migration(HiveMigrationCommand::MigrationPacket(packet)) => {
                 Self::handle_migration_packet(packet, sandbox, migration_manager).await?;
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::MigrationNotice {
+            HiveCommand::Migration(HiveMigrationCommand::MigrationNotice {
                 reference,
                 manifest,
                 snapshot_id: _,
-            } => {
+            }) => {
                 info!(
                     "Received Registry Migration Notice for agent: {}",
                     manifest.metadata.name
@@ -387,11 +409,11 @@ impl HiveServer {
                     }
                 }
             }
-            HiveCommand::DhtUpdate {
+            HiveCommand::Dht(HiveDhtCommand::DhtUpdate {
                 alias,
                 node_ip,
                 signature,
-            } => {
+            }) => {
                 info!(
                     "Received DHT Route Update: {} -> {} (sig: {})",
                     alias, node_ip, signature
@@ -400,7 +422,7 @@ impl HiveServer {
                 // Our system delegates handling to SovereignGateway via the DHT wrapper.
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::ProposeAlias(proposal) => {
+            HiveCommand::Dht(HiveDhtCommand::ProposeAlias(proposal)) => {
                 info!(
                     "Received ProposeAlias for {}",
                     hex::encode(&proposal.alias_hash[..4])
@@ -408,25 +430,25 @@ impl HiveServer {
                 // Handled via Registry/Consensus abstraction
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::QuorumVote(_) => {
+            HiveCommand::Dht(HiveDhtCommand::QuorumVote(_)) => {
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::TransitLock {
+            HiveCommand::Migration(HiveMigrationCommand::TransitLock {
                 alias,
                 node_id,
                 ttl_seconds,
-            } => {
+            }) => {
                 info!(
                     "Received TransitLock for {} by {} (ttl: {}s)",
                     alias, node_id, ttl_seconds
                 );
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::TransitRelease(alias) => {
+            HiveCommand::Migration(HiveMigrationCommand::TransitRelease(alias)) => {
                 info!("Received TransitRelease for {}", alias);
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::TransferCredit(tx) => {
+            HiveCommand::Economy(HiveEconomyCommand::TransferCredit(tx)) => {
                 info!(
                     "Received TransferCredit of {} for {}",
                     tx.amount,
@@ -435,43 +457,43 @@ impl HiveServer {
                 // The native routing logic integrates right into VoucherRegistry securely.
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::BillRequest {
+            HiveCommand::Economy(HiveEconomyCommand::BillRequest {
                 source_alias,
                 target_alias,
                 amount,
-            } => {
+            }) => {
                 info!(
                     "Received BillRequest for {} -> {}: {}",
                     source_alias, target_alias, amount
                 );
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::WithdrawalPending(intent) => {
+            HiveCommand::Economy(HiveEconomyCommand::WithdrawalPending(intent)) => {
                 info!(
                     "Received WithdrawalPending for {} fuel targeting external address {}",
                     intent.internal_fuel, intent.target_address
                 );
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::MarketBidPacket(bid) => {
+            HiveCommand::Economy(HiveEconomyCommand::MarketBidPacket(bid)) => {
                 sandbox.market_handle.process_bid(bid);
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::RegistryQuery(cid) => {
+            HiveCommand::Registry(HiveRegistryCommand::RegistryQuery(cid)) => {
                 info!("Received RegistryQuery for CID {}", cid);
                 let home_dir = home::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
                 let block_path = home_dir.join(".trytet").join("registry_cas").join(&cid);
                 let available = block_path.exists();
-                let response = HiveCommand::RegistryQueryResponse { cid, available };
+                let response = HiveCommand::Registry(HiveRegistryCommand::RegistryQueryResponse { cid, available });
                 let response_bytes = bincode::serialize(&response)?;
                 let res_len = response_bytes.len() as u32;
                 socket.write_all(&res_len.to_be_bytes()).await?;
                 socket.write_all(&response_bytes).await?;
             }
-            HiveCommand::RegistryQueryResponse { .. } => {
+            HiveCommand::Registry(HiveRegistryCommand::RegistryQueryResponse { .. }) => {
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
-            HiveCommand::ChunkStream { .. } => {
+            HiveCommand::Registry(HiveRegistryCommand::ChunkStream { .. }) => {
                 socket.write_all(&0u32.to_be_bytes()).await?;
             }
         }
@@ -567,12 +589,10 @@ impl HiveClient {
         domain: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::network::tunnel::SovereignTunnel;
-        use crate::crypto::AgentWallet;
+        
         let mut socket = TcpStream::connect(target_addr).await?;
 
-        let local_secret = AgentWallet::load_or_create()?.inner_secret_bytes();
-        let remote_pubkey = [0u8; 32];
-        let mut tunnel = SovereignTunnel::init_initiator(&local_secret, &remote_pubkey)?;
+        let mut tunnel = SovereignTunnel::init_initiator_nn()?;
 
         if let Some(connector) = tls_connector {
             let server_name =
@@ -580,7 +600,7 @@ impl HiveClient {
             let mut tls_stream = connector.connect(server_name, socket).await?;
             
             let mut ix_buf = vec![0u8; 65535];
-            let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+            let len = tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.write_message(&[], &mut ix_buf)?;
             tls_stream.write_all(&(len as u32).to_be_bytes()).await?;
             tls_stream.write_all(&ix_buf[..len]).await?;
 
@@ -591,7 +611,7 @@ impl HiveClient {
             tls_stream.read_exact(&mut resp_payload).await?;
             
             let mut rx_buf = vec![0u8; 65535];
-            tunnel.noise_state.as_mut().unwrap().read_message(&resp_payload, &mut rx_buf)?;
+            tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.read_message(&resp_payload, &mut rx_buf)?;
             tunnel.to_transport()?;
 
             let enc_cmd = tunnel.encrypt_command(&command)?;
@@ -604,7 +624,7 @@ impl HiveClient {
             tls_stream.read_exact(&mut ack).await?;
         } else {
             let mut ix_buf = vec![0u8; 65535];
-            let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+            let len = tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.write_message(&[], &mut ix_buf)?;
             socket.write_all(&(len as u32).to_be_bytes()).await?;
             socket.write_all(&ix_buf[..len]).await?;
 
@@ -615,7 +635,7 @@ impl HiveClient {
             socket.read_exact(&mut resp_payload).await?;
             
             let mut rx_buf = vec![0u8; 65535];
-            tunnel.noise_state.as_mut().unwrap().read_message(&resp_payload, &mut rx_buf)?;
+            tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.read_message(&resp_payload, &mut rx_buf)?;
             tunnel.to_transport()?;
 
             let enc_cmd = tunnel.encrypt_command(&command)?;
@@ -636,15 +656,13 @@ impl HiveClient {
         command: HiveCommand,
     ) -> Result<HiveCommand, Box<dyn std::error::Error>> {
         use crate::network::tunnel::SovereignTunnel;
-        use crate::crypto::AgentWallet;
+        
         let mut socket = TcpStream::connect(target_addr).await?;
 
-        let local_secret = AgentWallet::load_or_create()?.inner_secret_bytes();
-        let remote_pubkey = [0u8; 32];
-        let mut tunnel = SovereignTunnel::init_initiator(&local_secret, &remote_pubkey)?;
+        let mut tunnel = SovereignTunnel::init_initiator_nn()?;
 
         let mut ix_buf = vec![0u8; 65535];
-        let len = tunnel.noise_state.as_mut().unwrap().write_message(&[], &mut ix_buf)?;
+        let len = tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.write_message(&[], &mut ix_buf)?;
         socket.write_all(&(len as u32).to_be_bytes()).await?;
         socket.write_all(&ix_buf[..len]).await?;
 
@@ -655,7 +673,7 @@ impl HiveClient {
         socket.read_exact(&mut resp_payload).await?;
         
         let mut rx_buf = vec![0u8; 65535];
-        tunnel.noise_state.as_mut().unwrap().read_message(&resp_payload, &mut rx_buf)?;
+        tunnel.noise_state.as_mut().ok_or_else(|| anyhow::anyhow!("Noise state missing"))?.read_message(&resp_payload, &mut rx_buf)?;
         tunnel.to_transport()?;
 
         let enc_cmd = tunnel.encrypt_command(&command)?;
@@ -678,7 +696,7 @@ impl HiveClient {
             let response = tunnel.decrypt_payload(&res_payload)?;
             Ok(response)
         } else {
-            Ok(HiveCommand::Pulse) // empty ack
+            Ok(HiveCommand::Network(HiveNetworkCommand::Pulse)) // empty ack
         }
     }
 }

@@ -1,0 +1,10 @@
+target/
+playground/node_modules/
+sdk/typescript/node_modules/
+.git/
+**/.DS_Store
+.env
+.vercel/
+.next/
+*.wasm
+!playground/public/*.wasm

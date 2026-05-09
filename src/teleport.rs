@@ -84,11 +84,11 @@ impl TeleportRequest {
 
             HiveClient::send_command(
                 &self.target_address,
-                HiveCommand::MigrationNotice {
+                HiveCommand::Migration(crate::hive::HiveMigrationCommand::MigrationNotice {
                     reference,
                     manifest: manifest.clone(),
                     snapshot_id: snapshot_id.clone(),
-                },
+                }),
             )
             .await
             .map_err(|e| TeleportError::TargetError(e.to_string()))?;
@@ -96,10 +96,10 @@ impl TeleportRequest {
             // Option A: Direct P2P Streaming
             HiveClient::send_command(
                 &self.target_address,
-                HiveCommand::MigrationPacket(MigrationPacket::Handshake {
+                HiveCommand::Migration(crate::hive::HiveMigrationCommand::MigrationPacket(MigrationPacket::Handshake {
                     manifest: manifest.clone(),
                     snapshot_id: snapshot_id.clone(),
-                }),
+                })),
             )
             .await
             .map_err(|e| TeleportError::TargetError(e.to_string()))?;
@@ -113,10 +113,10 @@ impl TeleportRequest {
                 let sequence = chunk_idx as u32;
                 HiveClient::send_command(
                     &self.target_address,
-                    HiveCommand::MigrationPacket(MigrationPacket::Payload {
+                    HiveCommand::Migration(crate::hive::HiveMigrationCommand::MigrationPacket(MigrationPacket::Payload {
                         chunk: chunk.to_vec(),
                         sequence,
-                    }),
+                    })),
                 )
                 .await
                 .map_err(|e| TeleportError::TargetError(e.to_string()))?;
@@ -125,7 +125,7 @@ impl TeleportRequest {
 
             HiveClient::send_command(
                 &self.target_address,
-                HiveCommand::MigrationPacket(MigrationPacket::Commit { signature: vec![] }),
+                HiveCommand::Migration(crate::hive::HiveMigrationCommand::MigrationPacket(MigrationPacket::Commit { signature: vec![] })),
             )
             .await
             .map_err(|e| TeleportError::TargetError(e.to_string()))?;

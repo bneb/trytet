@@ -27,8 +27,8 @@ impl GlobalRegistry for HiveDht {
 
             // O(log N) simulated broadcast: resolve alias over the mesh
             for target_node in all_peers {
-                let cmd = HiveCommand::ResolveAlias(alias.clone());
-                if let Ok(HiveCommand::ResolveAliasResponse(Some(_meta))) =
+                let cmd = HiveCommand::Dht(crate::hive::HiveDhtCommand::ResolveAlias(alias.clone()));
+                if let Ok(HiveCommand::Dht(crate::hive::HiveDhtCommand::ResolveAliasResponse(Some(_meta)))) =
                     HiveClient::rpc_call(&target_node.public_addr, cmd).await
                 {
                     // Target node holds the agent. Return its IP/addr.
@@ -59,11 +59,11 @@ impl GlobalRegistry for HiveDht {
         let peers = self.peers.clone();
 
         Box::pin(async move {
-            let cmd = HiveCommand::DhtUpdate {
+            let cmd = HiveCommand::Dht(crate::hive::HiveDhtCommand::DhtUpdate {
                 alias,
                 node_ip: ip,
                 signature: sig,
-            };
+            });
 
             let all_peers = peers.list_peers().await;
             // Push update to the shard.

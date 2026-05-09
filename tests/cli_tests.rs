@@ -178,7 +178,7 @@ async fn test_phase_10_live_migration() {
     let url2 = format!("http://127.0.0.1:{}", port2);
 
     // 1. Bootstrap: Node 2 joins Node 1's Hive
-    let join = tet_core::hive::HiveCommand::Join(tet_core::hive::HiveNodeIdentity {
+    let join = tet_core::hive::HiveCommand::Network(tet_core::hive::HiveNetworkCommand::Join(tet_core::hive::HiveNodeIdentity {
         node_id: "node2".to_string(),
         public_addr: format!("127.0.0.1:{}", hive_port2),
         available_fuel: 999999,
@@ -186,7 +186,7 @@ async fn test_phase_10_live_migration() {
         price_per_million_fuel: 100,
         min_reputation_score: 50,
         available_capacity_mb: 1000,
-    });
+    }));
 
     // Use the RPC system to notify Node 1.
     tet_core::hive::HiveClient::rpc_call(&format!("127.0.0.1:{}", hive_port1), join)

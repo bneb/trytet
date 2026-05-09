@@ -19,7 +19,7 @@
         (data (i32.const 8192)
             "{\"status\":\"sat\",\"solver\":\"z3-stub\",\"model\":{\"schedule\":[{\"day\":\"Mon\",\"time\":\"09:00\",\"event\":\"Team Standup\",\"room\":\"A1\"},{\"day\":\"Mon\",\"time\":\"14:00\",\"event\":\"Design Review\",\"room\":\"B3\"},{\"day\":\"Tue\",\"time\":\"10:00\",\"event\":\"Sprint Planning\",\"room\":\"A1\"},{\"day\":\"Wed\",\"time\":\"11:00\",\"event\":\"1:1 with Manager\",\"room\":\"C2\"},{\"day\":\"Thu\",\"time\":\"15:00\",\"event\":\"Demo Prep\",\"room\":\"A1\"}],\"conflicts\":0,\"solve_time_us\":42}}"
         )
-        ;; JSON length: 389 bytes
+        ;; JSON length: 416 bytes
 
         ;; Bump allocator for canonical ABI string passing
         (global $bump (mut i32) (i32.const 4096))
@@ -39,7 +39,7 @@
             ;; Write return struct at offset 2048
             (i32.store8 (i32.const 2048) (i32.const 0))    ;; Ok discriminant
             (i32.store (i32.const 2052) (i32.const 8192))   ;; ptr to JSON data
-            (i32.store (i32.const 2056) (i32.const 389))    ;; JSON length
+            (i32.store (i32.const 2056) (i32.const 416))    ;; JSON length
             (i32.const 2048)                                 ;; return pointer to ret area
         )
     )

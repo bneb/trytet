@@ -133,6 +133,10 @@ pub enum ExecutionStatus {
 
     /// The execution requested a migration and was safely ejected.
     Migrated,
+
+    /// The agent yielded execution to wait for an external event.
+    /// Memory state is snapshotted and evicted from RAM.
+    Suspended,
 }
 
 /// Structured crash diagnostics for LLM consumption.

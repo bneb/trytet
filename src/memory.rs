@@ -342,7 +342,7 @@ impl VectorVfs {
             }
         }
 
-        out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         out.into_iter()
             .take(query.limit as usize)
             .map(|(score, r)| SearchResult {

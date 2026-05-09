@@ -98,7 +98,11 @@ impl TetMesh {
     pub async fn register(&self, alias: String, metadata: crate::models::TetMetadata) {
         let mut reg = self.registry.write().await;
         let entries = reg.entry(alias).or_default();
-        entries.push(metadata);
+        if let Some(existing) = entries.iter_mut().find(|e| e.tet_id == metadata.tet_id) {
+            *existing = metadata;
+        } else {
+            entries.push(metadata);
+        }
     }
 
     pub async fn resolve_local(&self, alias: &str) -> Option<crate::models::TetMetadata> {
@@ -127,8 +131,8 @@ impl TetMesh {
         // Global Mesh Lookup
         let nodes = self.hive_peers.list_peers().await;
         for target_node in nodes {
-            let cmd = crate::hive::HiveCommand::ResolveAlias(alias.to_string());
-            if let Ok(crate::hive::HiveCommand::ResolveAliasResponse(Some(meta))) =
+            let cmd = crate::hive::HiveCommand::Dht(crate::hive::HiveDhtCommand::ResolveAlias(alias.to_string()));
+            if let Ok(crate::hive::HiveCommand::Dht(crate::hive::HiveDhtCommand::ResolveAliasResponse(Some(meta)))) =
                 crate::hive::HiveClient::rpc_call(&target_node.public_addr, cmd).await
             {
                 // We found it remotely! Note: It contains a remote node boundary in the future
@@ -142,6 +146,17 @@ impl TetMesh {
     /// Removes an alias from the registry.
     pub async fn deregister(&self, alias: &str) {
         self.registry.write().await.remove(alias);
+    }
+
+    /// Removes a specific snapshot metadata entry for an alias.
+    pub async fn remove_by_snapshot(&self, alias: &str, snapshot_id: &str) {
+        let mut reg = self.registry.write().await;
+        if let Some(entries) = reg.get_mut(alias) {
+            entries.retain(|e| e.snapshot_id.as_deref() != Some(snapshot_id));
+            if entries.is_empty() {
+                reg.remove(alias);
+            }
+        }
     }
 
     /// Sends a remote procedure call across the internal channel.

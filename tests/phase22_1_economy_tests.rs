@@ -98,16 +98,16 @@ async fn test_phase22_service_for_fuel_mesh_call() {
     // This evaluates the structure of the HiveCommand linking the payment boundary.
     use tet_core::hive::HiveCommand;
 
-    let bill_req = HiveCommand::BillRequest {
+    let bill_req = HiveCommand::Economy(tet_core::hive::HiveEconomyCommand::BillRequest {
         source_alias: "AgentA".to_string(),
         target_alias: "TranslatorAgent".to_string(),
         amount: 50_000,
-    };
+    });
 
     // Here we synthetically process it as though the network resolved the bill request via Mesh.
     // In a full environment, AgentA natively calls trytet::pay to satisfy the BillRequest.
     assert!(matches!(
         bill_req,
-        HiveCommand::BillRequest { amount: 50000, .. }
+        HiveCommand::Economy(tet_core::hive::HiveEconomyCommand::BillRequest { amount: 50000, .. })
     ));
 }

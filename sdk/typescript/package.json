@@ -1,0 +1,18 @@
+{
+  "name": "@trytet/client",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for the Trytet Engine",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["trytet", "wasm", "agent", "llm"],
+  "author": "Trytet",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {}
+}

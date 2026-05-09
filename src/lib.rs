@@ -47,6 +47,7 @@ pub mod memory;
 pub mod network;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mesh;
+pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mesh_worker;
 #[cfg(not(target_arch = "wasm32"))]
