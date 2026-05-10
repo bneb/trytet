@@ -5,6 +5,15 @@ import { TrytetClient } from '@trytet/client';
 import { Play, Loader2, Server, Hexagon } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+interface BenchmarkResult {
+    status: string;
+    duration_ms: number;
+    output?: string;
+    error?: string;
+    fuel?: number;
+    type?: 'loop' | 'comp';
+}
+
 // Generate 50 snippets: 40 valid, 10 infinite loops
 const generateSnippets = () => {
     const snippets = [];
@@ -272,16 +281,6 @@ export default function BenchmarkDemo() {
                 <div className="text-[var(--text-sub)] text-sm">Total Execution Time:</div>
                 <div className={`text-2xl font-mono font-bold ${trytetDuration ? 'text-[var(--mint-success)]' : 'text-gray-500'}`}>
                     {trytetDuration ? `${(trytetDuration / 1000).toFixed(3)}s` : '0.000s'}
-                </div>
-            </div>
-          </div>
-
-        </div>
-      </main>
-    </div>
-  );
-}
- 1000).toFixed(3)}s` : '0.000s'}
                 </div>
             </div>
           </div>

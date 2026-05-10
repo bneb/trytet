@@ -177,7 +177,8 @@ export default function WebDemoPage() {
         if (wasmEngine) {
             const t0 = performance.now();
             try {
-                bincodeBlob = wasmEngine.snapshot_state(stateBytes);
+                const engine = wasmEngine as { snapshot_state: (b: Uint8Array) => Uint8Array };
+                bincodeBlob = engine.snapshot_state(stateBytes);
                 serializeMs = performance.now() - t0;
                 blobSize = bincodeBlob!.length;
                 blobPreview = toHex(bincodeBlob!);
@@ -212,7 +213,7 @@ export default function WebDemoPage() {
             sha256: '', stateSize: stateBytes.length,
         };
 
-        snap._blob = bincodeBlob;
+        snap._blob = bincodeBlob || undefined;
 
         // Compute SHA-256 asynchronously
         if (bincodeBlob) {
