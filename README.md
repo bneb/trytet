@@ -45,20 +45,33 @@ graph TD
 - **Northstar Benchmarks**: Built-in latency instrumentation across five critical paths.
 - **Path Jailing**: Host filesystem isolation, OOB bounds checking, and preemptive watchdogs for inference loads.
 
-## Quickstart
+## Frictionless Quickstart
+
+Experience Trytet's uncrashable determinism in under 60 seconds. 
+
+### Option 1: The "Wow" Demo (2 Commands)
+Launch the Time-Travel Debugger or the Sub-Millisecond Wasm benchmark instantly.
 
 ```bash
-# Boot an agent
-tet up my-agent.tet --fuel 50000
+# 1. Install the CLI
+curl -sL https://trytet.io/install.sh | bash
 
-# View running agents
-tet ps
+# 2. Run the interactive Uncrashable Demo
+tet mcp
+```
 
-# Tail telemetry
-tet logs -f my-agent
+### Option 2: Build Your Own Agent (3 Commands)
+Compile standard TypeScript into a secure, deterministic Trytet agent and execute it.
 
-# Run the Northstar benchmark suite
-tet metrics
+```bash
+# 1. Write an agent script
+echo "console.log('Hello from a deterministic sandbox');" > agent.ts
+
+# 2. Compile to a Trytet Component (.tet)
+tet build agent.ts -o agent.tet
+
+# 3. Boot it in the Trytet Engine
+tet up agent.tet --fuel 1000000
 ```
 
 Dashboard at `http://localhost:3000/console`.

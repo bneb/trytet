@@ -22,11 +22,14 @@ pub async fn mcp_cmd() -> Result<()> {
 
     // Precompile known cartridges so they are ready to be invoked
     let cartridges = ["js-evaluator", "python-evaluator", "regex-evaluator", "scraper-cartridge", "jmespath-cartridge", "sat-cartridge"];
-    let base_dir = std::env::current_dir().unwrap().join("crates");
+    let base_dir = home::home_dir().unwrap_or_default().join(".trytet").join("cartridges");
     
     for c in cartridges {
         let name = c.replace("-", "_");
-        let wasm_path = base_dir.join(c).join("target/wasm32-wasip1/release").join(format!("{}.wasm", name));
+        let local_path = std::env::current_dir().unwrap_or_default().join("crates").join(c).join("target/wasm32-wasip1/release").join(format!("{}.wasm", name));
+        let global_path = base_dir.join(format!("{}.wasm", name));
+        
+        let wasm_path = if local_path.exists() { local_path } else { global_path };
         if let Ok(wasm) = std::fs::read(&wasm_path) {
             let _ = sandbox.cartridge_manager.precompile(c, &wasm);
         }

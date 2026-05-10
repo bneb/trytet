@@ -20,20 +20,44 @@
     </nav>
 
     <header class="hero">
-        <h1>The Fastest, Safest Code<br>Evaluator for AI Agents.</h1>
+        <h1>The Universal Execution Primitive<br>for Agentic AI.</h1>
 
-        <div style="max-width: 600px; margin: 0 auto 48px; text-align: left;">
+        <div style="max-width: 800px; margin: 0 auto 48px; text-align: left;">
             <p style="font-size: 20px; color: var(--text-soft); margin-bottom: 16px;">
-                <span class="text-gradient">Stop waiting on slow Firecracker VMs.</span><br><span
-                    class="text-gradient-secondary"> Trytet runs untrusted Python and JS in fuel-bounded WebAssembly sandboxes with sub-200µs cold starts. Trap infinite loops instantly.</span><br>
+                <span class="text-gradient">For the L4 Engineer:</span> Stop fighting Docker networking and 3-second cold starts just to evaluate a Python script. Trytet maps Wasm components directly into memory in <strong>&lt;200µs</strong>. It's the speed of V8 with the security of a microVM.<br><br>
+                <span class="text-gradient-secondary">For the TPM:</span> Ship autonomous agents to production safely. Trytet mathematically guarantees your infrastructure won't crash when an LLM hallucinates an infinite loop or a memory bomb. 
             </p>
         </div>
 
         <div class="cta-row">
-            <a href="how-to.html" class="btn">View Use Cases</a>
-            <a href="#pricing" class="btn btn-primary">Buy License</a>
+            <a href="https://trytet-playground.pages.dev/benchmark" class="btn">View Live Benchmark</a>
+            <a href="#quickstart" class="btn btn-primary">Quickstart</a>
         </div>
     </header>
+
+    <section id="quickstart" style="max-width: 800px; margin: 80px auto; text-align: left; padding: 20px;">
+        <h2>Frictionless Quickstart</h2>
+        <p style="color: var(--text-soft); margin-bottom: 20px;">Experience uncrashable determinism in two commands.</p>
+        <div class="execution-cell" style="margin-bottom: 30px;">
+            <pre><code><span class="tc-comment"># 1. Install the CLI</span>
+curl -sL https://trytet.io/install.sh | bash
+
+<span class="tc-comment"># 2. Boot the MCP Server for your IDE (Cursor/Claude)</span>
+tet mcp</code></pre>
+        </div>
+        
+        <p style="color: var(--text-soft); margin-bottom: 20px;">Or build your own secure agent in three commands:</p>
+        <div class="execution-cell">
+            <pre><code><span class="tc-comment"># 1. Write an agent script</span>
+echo "console.log('Hello from a deterministic sandbox');" > agent.ts
+
+<span class="tc-comment"># 2. Compile to a Trytet Component (.tet)</span>
+tet build agent.ts -o agent.tet
+
+<span class="tc-comment"># 3. Boot it in the Trytet Engine</span>
+tet up agent.tet --fuel 1000000</code></pre>
+        </div>
+    </section>
 
     <div class="execution-cell-container">
         <div class="execution-cell">

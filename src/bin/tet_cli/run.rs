@@ -22,8 +22,11 @@ pub async fn build_cmd(entry: &std::path::Path, out: &std::path::Path) -> Result
     // 3. For the BYOL pipeline, we actually bundle the JS Evaluator Cartridge and inject the JS code.
     // In a full implementation, this uses `jco` to create a standalone component.
     // For this MVP, we will construct a valid .tet artifact that wraps the source.
-    let base_dir = std::env::current_dir().unwrap().join("crates");
-    let wasm_path = base_dir.join("js-evaluator").join("target/wasm32-wasip1/release/js_evaluator.wasm");
+    let base_dir = home::home_dir().unwrap_or_default().join(".trytet").join("cartridges");
+    let local_path = std::env::current_dir().unwrap_or_default().join("crates").join("js-evaluator").join("target/wasm32-wasip1/release/js_evaluator.wasm");
+    let global_path = base_dir.join("js_evaluator.wasm");
+    
+    let wasm_path = if local_path.exists() { local_path } else { global_path };
     
     let wasm_bytes = fs::read(&wasm_path).unwrap_or_else(|_| {
         println!("{} Warning: js_evaluator.wasm not found. Building empty agent shell.", "⚠".yellow());

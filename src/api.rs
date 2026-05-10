@@ -209,9 +209,11 @@ async fn handle_node_benchmark(
     let start = std::time::Instant::now();
     
     // We use a small JS wrapper to evaluate the code and print the result
+    // To prevent trivial RCE, we use `vm.runInNewContext` which isolates the execution from the Node global object (like `process`).
     let script = format!(
-        "try {{ const res = eval({}); console.log(JSON.stringify({{ status: 'Success', result: String(res) }})); }} catch(e) {{ console.log(JSON.stringify({{ status: 'Error', error: e.message }})); }}",
-        serde_json::to_string(&req.snippet).unwrap_or_default()
+        "const vm = require('vm'); try {{ const res = vm.runInNewContext({}, {{}}, {{ timeout: {} }}); console.log(JSON.stringify({{ status: 'Success', result: String(res) }})); }} catch(e) {{ if (e.message.includes('timed out')) {{ console.log(JSON.stringify({{ status: 'Timeout', error: e.message }})); }} else {{ console.log(JSON.stringify({{ status: 'Error', error: e.message }})); }} }}",
+        serde_json::to_string(&req.snippet).unwrap_or_default(),
+        req.timeout_ms
     );
 
     let mut child = match tokio::process::Command::new("node")
