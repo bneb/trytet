@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y cmake clang protobuf-compiler
+
+      - name: Build
+        run: cargo build --release --bin tet
+
+      - name: Test
+        run: cargo test --release -- --test-threads=2
+
+      - name: Clippy
+        # Cap dependency lints to avoid upstream warnings promoted to errors.
+        # Only our crate is linted with -D warnings.
+        run: cargo clippy --all-targets -- --cap-lints warn -D warnings
+
+      - name: Smoke test CLI
+        run: |
+          set -euo pipefail
+          TET="$(pwd)/target/release/tet"
+
+          echo "=== tet --help ==="
+          "$TET" --help
+
+          echo "=== tet --version ==="
+          "$TET" --version
+
+          echo "=== tet doctor ==="
+          "$TET" doctor
+
+          echo "=== tet mcp --list-tools ==="
+          TOOLS=$("$TET" mcp --list-tools 2>/dev/null | grep -c trytet_ || echo 0)
+          echo "$TOOLS tools listed"
+          [ "$TOOLS" -eq 8 ] || { echo "Expected 8 tools, got $TOOLS"; exit 1; }
+
+          echo "=== tet setup (temp home) ==="
+          FAKE_HOME=$(mktemp -d)
+          mkdir -p "$FAKE_HOME/Library/Application Support/Claude"
+          echo '{"preferences":{"theme":"dark"}}' > "$FAKE_HOME/Library/Application Support/Claude/claude_desktop_config.json"
+          HOME="$FAKE_HOME" "$TET" setup
+          grep -q trytet "$FAKE_HOME/Library/Application Support/Claude/claude_desktop_config.json" || { echo "Setup did not add trytet to config"; exit 1; }
+          echo "Setup wrote config correctly"
+
+          echo "=== tet init (temp dir) ==="
+          PROJ_DIR=$(mktemp -d)
+          (cd "$PROJ_DIR" && "$TET" init test-project)
+          [ -f "$PROJ_DIR/test-project/agent.ts" ] || { echo "init did not create agent.ts"; exit 1; }
+          [ -f "$PROJ_DIR/test-project/tet.toml" ] || { echo "init did not create tet.toml"; exit 1; }
+          echo "init scaffolded project correctly"
+
+          echo "=== All smoke tests passed ==="
+
+  fuzz:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y cmake clang
+
+      - name: fuzz wasm_parse (60s)
+        run: cargo +nightly fuzz run wasm_parse -- -max_total_time=60
+
+      - name: fuzz fuel_voucher (60s)
+        run: cargo +nightly fuzz run fuel_voucher -- -max_total_time=60
+
+  fmt:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format check
+        run: cargo fmt --check --all
+
+  security-audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        # Non-zero on vulnerabilities in dependencies (we can't fix upstream).
+        # Review advisories manually and file issues for actionable ones.
+        continue-on-error: true
+        run: cargo audit

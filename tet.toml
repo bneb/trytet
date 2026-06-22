@@ -1,0 +1,23 @@
+[swarm]
+name = "Phase22_Validation"
+
+[[agents]]
+alias = "researcher_1"
+base = "python-3.11"
+entrypoint = "research_gen.wasm"
+[agents.economy]
+max_fuel = 1000000
+
+[[agents]]
+alias = "librarian_1"
+base = "alpine"
+entrypoint = "db_indexer.wasm"
+[agents.mesh]
+allow_call = ["researcher_1"]
+
+[[agents]]
+alias = "analyst_1"
+base = "python-3.11"
+entrypoint = "data_vis.wasm"
+[agents.economy]
+max_fuel = 500000

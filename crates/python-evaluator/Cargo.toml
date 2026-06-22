@@ -1,0 +1,18 @@
+[package]
+name = "python-evaluator"
+version = "0.2.0"
+edition = "2021"
+description = "Trytet Python Evaluator Cartridge"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[target.wasm32-wasip2.lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rustpython-vm = { version = "0.3.1", default-features = false, features = ["compiler"] }
+wit-bindgen = "0.24.0"
+
+# profile.release inherited from workspace root

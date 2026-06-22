@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trytet Documentation</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #0a0a0f; color: #e0e0e0; line-height: 1.6; }
+        h1 { font-size: 2em; margin-bottom: 8px; }
+        h2 { font-size: 1.3em; margin-top: 40px; border-bottom: 1px solid #222; padding-bottom: 8px; }
+        a { color: #007aff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code { background: #1a1a2e; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+        pre { background: #1a1a2e; padding: 16px; border-radius: 8px; overflow-x: auto; }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Trytet Documentation</h1>
+    <p>WebAssembly sandbox engine for AI agent tool use. Executes LLM-generated code in fuel-bounded Wasm sandboxes.</p>
+
+    <h2>Quickstart</h2>
+    <pre><code>curl -sL https://github.com/bneb/trytet/releases/latest/download/tet-darwin-aarch64.tar.gz | tar xz
+sudo mv tet /usr/local/bin/
+tet mcp      # Start MCP server for Claude Desktop / Cursor
+tet up       # Start API server on port 3000</code></pre>
+
+    <h2>Installation</h2>
+    <ul>
+        <li><a href="#macos">macOS (Apple Silicon)</a></li>
+        <li><a href="#linux">Linux (ARM64)</a></li>
+        <li><a href="#docker">Docker</a></li>
+        <li><a href="#source">Build from source</a></li>
+    </ul>
+
+    <h2 id="macos">macOS</h2>
+    <pre><code>curl -sL https://github.com/bneb/trytet/releases/latest/download/tet-darwin-aarch64.tar.gz | tar xz
+sudo mv tet /usr/local/bin/</code></pre>
+
+    <h2 id="linux">Linux</h2>
+    <pre><code>curl -sL https://github.com/bneb/trytet/releases/latest/download/tet-linux-aarch64.tar.gz | tar xz
+sudo mv tet /usr/local/bin/</code></pre>
+
+    <h2 id="docker">Docker</h2>
+    <pre><code>docker build -t trytet-api:latest .
+docker run -p 3000:3000 trytet-api:latest</code></pre>
+
+    <h2 id="source">Build from source</h2>
+    <pre><code>git clone https://github.com/bneb/trytet
+cd trytet
+cargo build --release --bin tet</code></pre>
+    <p>Requires Rust 1.80+, cmake, clang, protobuf-compiler.</p>
+
+    <h2>MCP Server</h2>
+    <p>The Model Context Protocol server exposes 5 sandboxed tools:</p>
+    <ul>
+        <li><code>trytet_js_evaluator</code> — Execute JavaScript with fuel and memory limits</li>
+        <li><code>trytet_regex_evaluator</code> — Run regex patterns safely (ReDoS-protected)</li>
+        <li><code>trytet_jmespath_evaluator</code> — Query JSON with JMESPath</li>
+        <li><code>trytet_scraper</code> — Fetch URL content</li>
+        <li><code>trytet_structured_data</code> — Filter and sort JSON arrays</li>
+    </ul>
+    <p>Configure Claude Desktop by adding to <code>claude_desktop_config.json</code>:</p>
+    <pre><code>{
+  "mcpServers": {
+    "trytet": {
+      "command": "tet",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+
+    <h2>API Reference</h2>
+    <ul>
+        <li><code>POST /v1/tet/execute</code> — Execute a Wasm payload</li>
+        <li><code>POST /v1/tet/snapshot/{id}</code> — Snapshot agent state</li>
+        <li><code>POST /v1/tet/fork/{snapshot_id}</code> — Fork from snapshot</li>
+        <li><code>POST /v1/mcp</code> — JSON-RPC endpoint for MCP</li>
+        <li><code>GET /v1/swarm/metrics</code> — Benchmark report</li>
+        <li><code>GET /health</code> — Health check</li>
+    </ul>
+
+    <h2>SDKs</h2>
+    <h3>TypeScript</h3>
+    <pre><code>npm install @trytet/client</code></pre>
+    <pre><code>import { TrytetClient } from '@trytet/client';
+const client = new TrytetClient();
+const result = await client.execute({ payload: wasmBytes, allocated_fuel: 1_000_000 });</code></pre>
+
+    <h3>Python</h3>
+    <pre><code>pip install trytet-client</code></pre>
+    <pre><code>from trytet_client import TrytetClient, TetExecutionRequest
+async with TrytetClient() as client:
+    result = await client.execute(TetExecutionRequest(payload=wasm_bytes, allocated_fuel=1_000_000))</code></pre>
+
+    <h2>Building Cartridges</h2>
+    <p>Cartridges are Wasm components that implement the <code>cartridge-v1</code> interface. See the <a href="https://github.com/bneb/trytet/blob/main/ARCHITECTURE.md#2-cartridge-substrate-srccartridgers-witcartridgewit">cartridge guide</a> for the interface and architecture.</p>
+
+    <h2>CLI Reference</h2>
+    <ul>
+        <li><code>tet up</code> — Start API server</li>
+        <li><code>tet mcp</code> — Start MCP server</li>
+        <li><code>tet ps</code> — List running agents</li>
+        <li><code>tet metrics</code> — Run benchmarks</li>
+        <li><code>tet publish &lt;file&gt; --tag &lt;name&gt;</code> — Publish cartridge</li>
+        <li><code>tet search &lt;query&gt;</code> — Search cartridge registry</li>
+        <li><code>tet validate &lt;file&gt;</code> — Validate cartridge</li>
+        <li><code>tet init [name]</code> — Scaffold agent project</li>
+        <li><code>tet key-create --label &lt;name&gt;</code> — Create API key</li>
+        <li><code>tet key-list</code> — List API keys</li>
+        <li><code>tet key-revoke &lt;prefix&gt;</code> — Revoke API key</li>
+    </ul>
+
+    <footer style="margin-top: 60px; border-top: 1px solid #222; padding-top: 20px; color: #666; font-size: 0.85em;">
+        <p>Trytet — MIT License · <a href="https://github.com/bneb/trytet">GitHub</a></p>
+    </footer>
+</body>
+</html>

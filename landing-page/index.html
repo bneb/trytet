@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trytet — Sandboxed code execution for AI agents</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav>
+        <a href="#" class="brand">Trytet</a>
+        <div class="nav-links">
+            <a href="https://github.com/bneb/trytet">GitHub</a>
+            <a href="https://github.com/bneb/trytet/blob/main/ARCHITECTURE.md">Architecture</a>
+            <a href="https://github.com/bneb/trytet/blob/main/demos/README.md">Demos</a>
+            <a href="https://github.com/bneb/trytet/blob/main/docs/VERIFY.md">Verify</a>
+            <a href="how-to.html">Guide</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <h1>Have your AI run its code on Trytet.</h1>
+        <p>
+            When Claude or Cursor generates a bug, Trytet catches it. Infinite loops
+            trap in microseconds. Memory bombs hit a ceiling. Your process stays up,
+            your agent gets a structured error, and it tries again.
+        </p>
+        <div class="cta-row">
+            <a href="#install" class="btn btn-primary">Get started</a>
+            <a href="https://github.com/bneb/trytet" class="btn">GitHub</a>
+        </div>
+    </header>
+
+    <section class="section">
+        <h2>Why Trytet</h2>
+        <p class="section-desc">
+            Running AI-generated code means choosing between speed, safety, and
+            control. Each approach makes a different trade-off. Trytet adds fuel
+            metering and snapshot/fork — two primitives the other options don't have.
+        </p>
+        <table>
+            <tr>
+                <td></td>
+                <td><strong>Bash</strong></td>
+                <td><strong>Docker</strong></td>
+                <td><strong>Firecracker</strong></td>
+                <td><strong>V8 isolates</strong></td>
+                <td><strong>Wasmtime</strong></td>
+                <td class="trytet-col"><strong>Trytet</strong></td>
+            </tr>
+            <tr>
+                <td>Fuel metering</td>
+                <td class="status-experimental">no</td>
+                <td class="status-experimental">timeout only</td>
+                <td class="status-experimental">timeout only</td>
+                <td class="status-experimental">timeout only</td>
+                <td class="status-shipped">yes</td>
+                <td class="trytet-col status-shipped">yes</td>
+            </tr>
+            <tr>
+                <td>Memory caps</td>
+                <td class="status-experimental">no</td>
+                <td>cgroups</td>
+                <td>cgroups</td>
+                <td>V8 heap limit</td>
+                <td class="status-shipped">yes</td>
+                <td class="trytet-col status-shipped">yes</td>
+            </tr>
+            <tr>
+                <td>Startup</td>
+                <td>&lt;1ms</td>
+                <td>~500ms</td>
+                <td>~125ms</td>
+                <td>&lt;1ms</td>
+                <td>&lt;1ms</td>
+                <td class="trytet-col">&lt;500&micro;s cached</td>
+            </tr>
+            <tr>
+                <td>Snapshot / fork</td>
+                <td class="status-experimental">no</td>
+                <td class="status-experimental">no</td>
+                <td>snapshot only</td>
+                <td class="status-experimental">no</td>
+                <td class="status-experimental">no</td>
+                <td class="trytet-col status-shipped">yes</td>
+            </tr>
+            <tr>
+                <td>Zero config</td>
+                <td class="status-shipped">yes</td>
+                <td class="status-experimental">no</td>
+                <td class="status-experimental">no</td>
+                <td class="status-shipped">yes</td>
+                <td class="status-experimental">no</td>
+                <td class="trytet-col">tet setup</td>
+            </tr>
+        </table>
+        <p class="section-desc" style="margin-top: 20px;">
+            If you're running your own code, Bash is already there. If you're
+            running LLM-generated code in production, fuel metering turns hangs
+            into errors, and snapshot/fork lets agents checkpoint state and
+            explore branches. That's the trade-off.
+        </p>
+    </section>
+
+    <section class="section">
+        <h2>How it works</h2>
+        <p class="section-desc">
+            Code runs in a WebAssembly sandbox backed by Wasmtime. Every CPU instruction
+            burns fuel from a budget. When fuel hits zero, execution traps deterministically.
+            Memory is capped per sandbox. The caller gets a structured error instead of a
+            hung process.
+        </p>
+        <div class="metrics-row">
+            <div class="metric-item">
+                <div class="metric-value">&lt;500&micro;s</div>
+                <div class="metric-label">Cached cartridge call</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">~50ms</div>
+                <div class="metric-label">MCP server boot</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">8</div>
+                <div class="metric-label">MCP tools</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">0</div>
+                <div class="metric-label">CI test failures</div>
+            </div>
+        </div>
+    </section>
+
+    <section id="install" class="section">
+        <h2>Install</h2>
+
+        <h3>macOS</h3>
+        <div class="code-block">
+            <pre><code>curl -sL https://github.com/bneb/trytet/releases/latest/download/tet-darwin-aarch64.tar.gz | tar xz
+./tet exec "2 + 2"         # sandboxed JS — like node -e but fuel-metered
+./tet setup                # registers with Claude Desktop, Cursor, and agy</code></pre>
+        </div>
+
+        <h3>Docker</h3>
+        <div class="code-block">
+            <pre><code>docker pull ghcr.io/bneb/trytet:latest</code></pre>
+        </div>
+
+        <h3>SDK</h3>
+        <div class="code-block">
+            <pre><code>npm install trytet-client     # TypeScript
+pip install trytet-client     # Python</code></pre>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>Tools</h2>
+        <table>
+            <tr><td><strong>trytet_execute</strong></td><td>Execute JavaScript or Python in a sandbox</td><td class="status-shipped">shipped</td></tr>
+            <tr><td><strong>trytet_snapshot</strong></td><td>Capture agent memory and filesystem state</td><td class="status-shipped">shipped</td></tr>
+            <tr><td><strong>trytet_fork</strong></td><td>Branch a new agent from a saved snapshot</td><td class="status-shipped">shipped</td></tr>
+            <tr><td><strong>trytet_js_evaluator</strong></td><td>Execute JavaScript with fuel and memory limits</td><td class="status-shipped">shipped</td></tr>
+            <tr><td><strong>trytet_regex_evaluator</strong></td><td>Run regex patterns (ReDoS-protected)</td><td class="status-shipped">shipped</td></tr>
+            <tr><td><strong>trytet_jmespath_evaluator</strong></td><td>Query JSON with JMESPath expressions</td><td class="status-shipped">shipped</td></tr>
+            <tr><td><strong>trytet_scraper</strong></td><td>Parse HTML with CSS selectors</td><td class="status-experimental">experimental</td></tr>
+            <tr><td><strong>trytet_structured_data</strong></td><td>SQLite queries over JSON arrays</td><td class="status-experimental">experimental</td></tr>
+        </table>
+    </section>
+
+    <section class="section">
+        <h2>Snapshot &amp; Fork</h2>
+        <p class="section-desc">
+            Snapshot captures an agent's memory and filesystem state. Fork branches
+            that state into a new, independent agent. Checkpoint before risky operations.
+            Explore branches without repeating setup.
+        </p>
+        <div class="code-block">
+            <pre><code># Start the API server
+tet up
+
+# Execute a Wasm payload
+curl -X POST http://localhost:3000/v1/tet/execute \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer &lt;boot-key&gt;" \
+  -d '{"payload":[...],"allocated_fuel":1000000,"max_memory_mb":10}'
+
+# Snapshot the agent
+curl -X POST http://localhost:3000/v1/tet/snapshot/{tet_id} \
+  -H "Authorization: Bearer &lt;boot-key&gt;"
+
+# Fork from the snapshot
+curl -X POST http://localhost:3000/v1/tet/fork/{snapshot_id} \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer &lt;boot-key&gt;" \
+  -d '{"allocated_fuel":1000000,"max_memory_mb":10}'</code></pre>
+        </div>
+    </section>
+
+    <footer>
+        <p>
+            <a href="https://github.com/bneb/trytet">GitHub</a> &middot;
+            <a href="https://github.com/bneb/trytet/blob/main/ARCHITECTURE.md">Architecture</a> &middot;
+            <a href="https://github.com/bneb/trytet/blob/main/demos/README.md">Demos</a> &middot;
+            <a href="https://github.com/bneb/trytet/blob/main/docs/VERIFY.md">Verify</a> &middot;
+            <a href="how-to.html">Guide</a>
+        </p>
+    </footer>
+</body>
+</html>

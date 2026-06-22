@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How to use Trytet</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav>
+        <a href="index.html" class="brand">Trytet</a>
+        <div class="nav-links">
+            <a href="index.html">Home</a>
+            <a href="https://github.com/bneb/trytet">GitHub</a>
+            <a href="https://github.com/bneb/trytet/blob/main/ARCHITECTURE.md">Architecture</a>
+            <a href="https://github.com/bneb/trytet/blob/main/demos/README.md">Demos</a>
+            <a href="https://github.com/bneb/trytet/blob/main/docs/VERIFY.md">Verify</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <h1>How to use Trytet</h1>
+    </header>
+
+    <main>
+
+        <h2>1. Install</h2>
+        <div class="code-block">
+            <pre><code># macOS (Apple Silicon)
+curl -sL https://github.com/bneb/trytet/releases/latest/download/tet-darwin-aarch64.tar.gz | tar xz
+sudo mv tet /usr/local/bin/
+
+# Or build from source
+git clone https://github.com/bneb/trytet.git
+cd trytet
+cargo build --release --bin tet</code></pre>
+        </div>
+        <p>Run <code>tet doctor</code> to verify the install.</p>
+
+        <h2>2. Connect your editor</h2>
+        <p><code>tet setup</code> writes the MCP config automatically. Run it, restart
+        your editor, and the tools appear.</p>
+        <div class="code-block">
+            <pre><code>tet setup</code></pre>
+        </div>
+
+        <p>To configure manually, add this block to your editor's MCP config file:</p>
+
+        <h3>Claude Desktop</h3>
+        <div class="code-block claude">
+            <pre><code># ~/Library/Application Support/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "trytet": {
+      "command": "tet",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+        </div>
+
+        <h3>Cursor</h3>
+        <div class="code-block cursor">
+            <pre><code># ~/.cursor/mcp.json
+{
+  "mcpServers": {
+    "trytet": {
+      "command": "tet",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+        </div>
+
+        <h3>agy</h3>
+        <div class="code-block agy">
+            <pre><code># ~/.agy/mcp.json
+{
+  "mcpServers": {
+    "trytet": {
+      "command": "tet",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+        </div>
+
+        <p>Restart your editor. Run <code>tet mcp --list-tools</code> to verify 8 tools
+        are registered: execute, snapshot, fork, js_evaluator, regex_evaluator,
+        jmespath_evaluator, scraper, and structured_data.</p>
+
+        <h2>3. HTTP API</h2>
+        <p>Start the API server and execute payloads through the HTTP API.</p>
+        <div class="code-block">
+            <pre><code>tet up    # starts the API server on port 3000
+
+# Execute a Wasm payload
+curl -X POST http://localhost:3000/v1/tet/execute \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer &lt;boot-key&gt;" \
+  -d '{"payload":[...],"allocated_fuel":1000000,"max_memory_mb":64}'
+
+# Health check
+curl http://localhost:3000/health</code></pre>
+        </div>
+
+        <h2>4. SDK quickstart</h2>
+        <div class="code-block">
+            <pre><code>// TypeScript
+import { TrytetClient } from 'trytet-client';
+const client = new TrytetClient({ baseUrl: 'http://localhost:3000' });
+const tools = await client.listTools();</code></pre>
+        </div>
+        <div class="code-block">
+            <pre><code># Python
+from trytet_client import TrytetClient
+async with TrytetClient("http://localhost:3000") as client:
+    tools = await client.list_tools()</code></pre>
+        </div>
+
+        <h2>5. Write a cartridge</h2>
+        <p>Cartridges are Wasm components implementing the <code>cartridge-v1</code> WIT
+        interface. Each runs in an isolated sandbox with its own fuel and memory budget.</p>
+        <div class="code-block">
+            <pre><code>wit_bindgen::generate!({ world: "tool-guest", path: "wit/cartridge.wit" });
+
+struct MyCartridge;
+impl Guest for MyCartridge {
+    fn execute(input: String) -> Result&lt;String, String&gt; {
+        Ok(input.to_uppercase())
+    }
+}
+export!(MyCartridge);</code></pre>
+        </div>
+        <p>Build with <code>cargo component build --release</code>. Place the .wasm
+        in <code>dist/cartridges/</code> and rebuild <code>tet</code>.</p>
+
+        <h2>More</h2>
+        <ul>
+            <li><a href="https://github.com/bneb/trytet/blob/main/demos/README.md">Demos</a> — fuel trapping and snapshot/fork walkthroughs</li>
+            <li><a href="https://github.com/bneb/trytet/blob/main/docs/VERIFY.md">Verify</a> — assertion-based verification of every claim</li>
+            <li><a href="https://github.com/bneb/trytet/blob/main/CLI.md">CLI reference</a> — all 20 commands</li>
+            <li><a href="https://github.com/bneb/trytet/blob/main/ARCHITECTURE.md">Architecture</a> — module map, diagrams, subsystem docs</li>
+            <li><a href="https://github.com/bneb/trytet/blob/main/CONTRIBUTING.md">Contributing</a> — dev setup, tests, PR process</li>
+        </ul>
+
+    </main>
+
+    <footer>
+        <p>
+            <a href="https://github.com/bneb/trytet">GitHub</a> &middot;
+            <a href="https://github.com/bneb/trytet/blob/main/ARCHITECTURE.md">Architecture</a> &middot;
+            <a href="https://github.com/bneb/trytet/blob/main/demos/README.md">Demos</a> &middot;
+            <a href="https://github.com/bneb/trytet/blob/main/docs/VERIFY.md">Verify</a>
+        </p>
+    </footer>
+</body>
+</html>

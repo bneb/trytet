@@ -1,0 +1,17 @@
+[package]
+name = "sql-cartridge"
+version = "0.2.0"
+edition = "2021"
+description = "Trytet SQL Cartridge — SQLite in Wasm for AI agents"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[target.wasm32-wasip2.lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = "0.24.0"
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }

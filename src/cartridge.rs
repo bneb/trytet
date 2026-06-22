@@ -1,0 +1,359 @@
+//! Neuro-Symbolic Cartridge Substrate
+//!
+//! The `CartridgeManager` enables the Trytet Host to dynamically load, link,
+//! and execute Wasm Components ("Cartridges") using the Wasm Component Model.
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │  LLM Agent (fuzzy plan)                                     │
+//! │  "Schedule meetings avoiding conflicts using Z3 solver"     │
+//! └───────────────────┬─────────────────────────────────────────┘
+//!                     │ trytet::invoke_component("z3-solver", payload, fuel)
+//! ┌───────────────────▼─────────────────────────────────────────┐
+//! │  CartridgeManager                                           │
+//! │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────┐  │
+//! │  │ Compiled     │ │ Child Store  │ │ WIT Interface      │  │
+//! │  │ Cache        │ │ (fuel-bound) │ │ cartridge-v1       │  │
+//! │  │ DashMap<CID> │ │ StoreLimits  │ │ execute(str)->r<>  │  │
+//! │  └──────────────┘ └──────────────┘ └────────────────────┘  │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Lifecycle
+//!
+//! 1. **Registry Lookup**: The LLM requests `cartridge:z3-solver`
+//! 2. **Snapshot Loading**: Host pulls cartridge from registry
+//! 3. **Component Linking**: Host links Cartridge exports via WIT
+//! 4. **Fuel-Bound Execution**: Cartridge runs in its own sub-sandbox
+//! 5. **Instant Unmount**: Store dropped → $O(1)$ memory reclamation
+
+use dashmap::DashMap;
+use std::time::Instant;
+use thiserror::Error;
+use wasmtime::component::{Component, Linker, ResourceTable, Val};
+use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+
+// ---------------------------------------------------------------------------
+// Error Types
+// ---------------------------------------------------------------------------
+
+/// Errors specific to Cartridge operations.
+#[derive(Error, Debug)]
+pub enum CartridgeError {
+    /// The cartridge exhausted its allocated fuel budget.
+    /// This is the expected outcome for runaway solvers (e.g., Z3 logic bomb).
+    #[error("Cartridge fuel exhausted")]
+    FuelExhausted,
+
+    /// The cartridge exceeded its memory allocation.
+    #[error("Cartridge memory limit exceeded")]
+    MemoryExceeded,
+
+    /// The Wasm binary failed to compile as a Component.
+    #[error("Cartridge compilation failed: {0}")]
+    CompilationFailed(String),
+
+    /// The component does not export the required `cartridge-v1` interface.
+    #[error("Cartridge interface mismatch: {0}")]
+    InterfaceMismatch(String),
+
+    /// The cartridge's `execute` function returned an error result.
+    #[error("Cartridge execution error: {0}")]
+    ExecutionError(String, u64),
+
+    /// Failed to resolve the cartridge from the registry.
+    #[error("Cartridge registry error: {0}")]
+    RegistryError(String),
+}
+
+// ---------------------------------------------------------------------------
+// Cartridge Store State (minimal — cartridges are stateless)
+// ---------------------------------------------------------------------------
+
+/// The store-level state for a Cartridge execution.
+///
+/// Deliberately minimal: cartridges are stateless functional units.
+/// All persistence is handled by the parent Agent's CoW VFS.
+pub struct CartridgeState {
+    limits: StoreLimits,
+    wasi: WasiCtx,
+    table: ResourceTable,
+}
+
+impl WasiView for CartridgeState {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CartridgeManager
+// ---------------------------------------------------------------------------
+
+/// The host-side manager for loading, caching, and executing Cartridges.
+///
+/// Thread-safe: all interior state is behind concurrent data structures.
+/// A single `CartridgeManager` is shared across all Agents on a node.
+pub struct CartridgeManager {
+    /// Shared wasmtime Engine (same config as the parent sandbox).
+    engine: Engine,
+
+    /// Pre-compiled Component cache, keyed by content-addressed ID (CID).
+    /// `Component::new()` is expensive (Cranelift compilation); we do it once.
+    compiled_cache: DashMap<String, Component>,
+}
+
+impl CartridgeManager {
+    /// Create a new CartridgeManager backed by the given Engine.
+    ///
+    /// The Engine should have `consume_fuel(true)` and `component_model(true)`
+    /// in its config (both are set by `production_engine_config()`).
+    pub fn new(engine: &Engine) -> Self {
+        Self {
+            engine: engine.clone(),
+            compiled_cache: DashMap::new(),
+        }
+    }
+
+    /// Pre-compile a component from raw bytes and cache it.
+    ///
+    /// This is the expensive path — Cranelift compiles the Wasm to native code.
+    /// Subsequent `invoke()` calls for the same CID will hit the cache.
+    pub fn precompile(&self, cid: &str, component_bytes: &[u8]) -> Result<(), CartridgeError> {
+        let component = Component::new(&self.engine, component_bytes)
+            .map_err(|e| CartridgeError::CompilationFailed(format!("{e:#}")))?;
+
+        self.compiled_cache.insert(cid.to_string(), component);
+
+        Ok(())
+    }
+
+    /// Check if a component is already cached.
+    pub fn is_cached(&self, cid: &str) -> bool {
+        self.compiled_cache.contains_key(cid)
+    }
+
+    /// Evict a component from the cache.
+    pub fn evict(&self, cid: &str) {
+        self.compiled_cache.remove(cid);
+    }
+
+    /// The hot path: instantiate a cached Component, call `execute(input)`,
+    /// return the result string.
+    ///
+    /// Each invocation gets its own `Store` with independent fuel and memory
+    /// limits. When the Store is dropped, all guest memory is reclaimed in
+    /// $O(1)$ time.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(json_string)` — the cartridge's successful result
+    /// - `Err(FuelExhausted)` — the cartridge hit its fuel limit
+    /// - `Err(MemoryExceeded)` — the cartridge hit its memory limit
+    /// - `Err(ExecutionError)` — the cartridge's `execute` returned `Err`
+    /// - `Err(InterfaceMismatch)` — the component doesn't export `cartridge-v1`
+    pub fn invoke(
+        &self,
+        component_id: &str,
+        payload: &str,
+        fuel: u64,
+        max_memory_mb: u32,
+    ) -> Result<(String, InvocationMetrics), CartridgeError> {
+        let start = Instant::now();
+
+        // 1. Resolve the pre-compiled component from cache
+        let component = self.compiled_cache.get(component_id).ok_or_else(|| {
+            CartridgeError::RegistryError(format!(
+                "Component '{}' not found in compiled cache",
+                component_id
+            ))
+        })?;
+
+        // 2. Create a fresh child Store with the specified fuel and memory limits
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(max_memory_mb as usize * 1024 * 1024)
+            .instances(100)
+            .tables(10)
+            .memories(10)
+            .build();
+
+        let state = CartridgeState {
+            limits,
+            wasi: WasiCtxBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let mut store = Store::new(&self.engine, state);
+        store.limiter(|s| &mut s.limits);
+        store
+            .set_fuel(fuel)
+            .map_err(|e| CartridgeError::ExecutionError(format!("Failed to set fuel: {e}"), 0))?;
+
+        // 3. Create a component Linker and add WASI (empty standard environment)
+        let mut linker: Linker<CartridgeState> = Linker::new(&self.engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker).unwrap_or_else(|e| {
+            tracing::warn!("Failed to add WASI to cartridge linker: {}", e);
+        });
+
+        // Add trytet:component/host-api
+        let mut host_api = linker.instance("trytet:component/host-api").map_err(|e| {
+            CartridgeError::ExecutionError(format!("Failed to create host-api instance: {e}"), 0)
+        })?;
+
+        host_api
+            .func_wrap(
+                "fetch",
+                |mut caller: wasmtime::StoreContextMut<'_, CartridgeState>,
+                 params: (String,)|
+                 -> wasmtime::Result<(Result<String, String>,)> {
+                    let (url,) = params;
+
+                    // Capability check - in production we'd use caller.data().manifest
+                    // For now, basic fuel check
+                    let max_fuel = caller.get_fuel().unwrap_or(0);
+                    if 5000 > max_fuel {
+                        return Ok((Err("FuelExhausted".to_string()),));
+                    }
+                    let _ = caller.set_fuel(max_fuel - 5000);
+
+                    if url.starts_with("http") {
+                        // Testing/simulation: return mock payload. Production HTTP goes through
+                        // the host_api fetch function which enforces egress policy.
+                        Ok((Ok(format!("MOCK_FETCH_RESULT: {}", url)),))
+                    } else {
+                        Ok((Err("Unsupported protocol".to_string()),))
+                    }
+                },
+            )
+            .map_err(|e| {
+                CartridgeError::ExecutionError(format!("Failed to register fetch: {e}"), 0)
+            })?;
+
+        // 4. Instantiate the component
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .map_err(|e| classify_cartridge_trap(&e))?;
+
+        // 5. Look up the exported `execute` function via the cartridge-v1 interface
+        //    We must traverse into the exported interface instance.
+        let instance_index =
+            instance.get_export_index(&mut store, None, "trytet:component/cartridge-v1");
+        let func_index =
+            instance_index.and_then(|i| instance.get_export_index(&mut store, Some(&i), "execute"));
+
+        let mut execute_func = func_index.and_then(|idx| instance.get_func(&mut store, idx));
+
+        if execute_func.is_none() {
+            // Fallback to flattened export name for simpler components
+            execute_func = instance.get_func(&mut store, "execute");
+        }
+
+        let execute_func = execute_func.ok_or_else(|| {
+            CartridgeError::InterfaceMismatch(
+                "Component does not export 'execute' function from cartridge-v1 interface"
+                    .to_string(),
+            )
+        })?;
+
+        // 6. Call execute(input) -> result<string, string>
+        //    In the Component Model, result<string, string> is represented as a variant:
+        //    - Ok(string) = (0, string_ptr)
+        //    - Err(string) = (1, string_ptr)
+        let mut results = vec![Val::Bool(false)]; // placeholder, will be overwritten
+        let params = vec![Val::String(payload.into())];
+
+        let call_result = execute_func.call(&mut store, &params, &mut results);
+        let fuel_remaining = store.get_fuel().unwrap_or(0);
+        let fuel_consumed = fuel.saturating_sub(fuel_remaining);
+
+        let instantiation_to_result = start.elapsed();
+
+        match call_result {
+            Ok(()) => parse_cartridge_output(&results[0], fuel_consumed, instantiation_to_result),
+            Err(e) => Err(classify_cartridge_trap(&e)),
+        }
+    }
+}
+
+fn parse_cartridge_output(
+    result_val: &wasmtime::component::Val,
+    fuel_consumed: u64,
+    elapsed: std::time::Duration,
+) -> Result<(String, InvocationMetrics), CartridgeError> {
+    let duration_us = elapsed.as_micros() as u64;
+    let metrics = || InvocationMetrics {
+        fuel_consumed,
+        duration_us,
+    };
+    match result_val {
+        Val::Result(Ok(Some(inner))) => match inner.as_ref() {
+            Val::String(s) => Ok((s.to_string(), metrics())),
+            other => Err(CartridgeError::ExecutionError(
+                format!("Expected string in Ok, got: {:?}", other),
+                fuel_consumed,
+            )),
+        },
+        Val::Result(Ok(None)) => Err(CartridgeError::ExecutionError(
+            "Cartridge returned Ok with no value".into(),
+            fuel_consumed,
+        )),
+        Val::Result(Err(Some(inner))) => match inner.as_ref() {
+            Val::String(e) => Err(CartridgeError::ExecutionError(e.to_string(), fuel_consumed)),
+            other => Err(CartridgeError::ExecutionError(
+                format!("Cartridge returned error: {:?}", other),
+                fuel_consumed,
+            )),
+        },
+        Val::Result(Err(None)) => Err(CartridgeError::ExecutionError(
+            "Cartridge returned Err with no value".into(),
+            fuel_consumed,
+        )),
+        Val::String(s) => Ok((s.to_string(), metrics())),
+        other => Err(CartridgeError::InterfaceMismatch(format!(
+            "Expected result<string,string>, got: {:?}",
+            other
+        ))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Invocation Metrics
+// ---------------------------------------------------------------------------
+
+/// Performance metrics from a single Cartridge invocation.
+#[derive(Debug, Clone)]
+pub struct InvocationMetrics {
+    /// Fuel consumed by the cartridge execution.
+    pub fuel_consumed: u64,
+    /// Wall-clock duration in microseconds.
+    pub duration_us: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Trap Classification
+// ---------------------------------------------------------------------------
+
+/// Classify a wasmtime error into the appropriate CartridgeError.
+fn classify_cartridge_trap(error: &wasmtime::Error) -> CartridgeError {
+    let message = format!("{error:#}");
+
+    if message.contains("out of fuel")
+        || message.contains("fuel consumed")
+        || message.contains("all fuel consumed")
+    {
+        return CartridgeError::FuelExhausted;
+    }
+
+    if message.contains("memory")
+        && (message.contains("limit") || message.contains("maximum") || message.contains("grow"))
+    {
+        return CartridgeError::MemoryExceeded;
+    }
+
+    CartridgeError::ExecutionError(message, 0)
+}

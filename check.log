@@ -1,0 +1,130 @@
+    Checking tet-core v0.1.0 (/Users/kevin/projects/trytet)
+error[E0425]: cannot find value `prompt_tokens` in this scope
+   --> src/inference.rs:297:64
+    |
+297 |             let next_fuel = InferenceFuelCalculator::calculate(prompt_tokens, tokens_generated + chunk_tokens);
+    |                                                                ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `prompt_tokens` in this scope
+   --> src/inference.rs:309:62
+    |
+309 |         let fuel_burned = InferenceFuelCalculator::calculate(prompt_tokens, tokens_generated);
+    |                                                              ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `prompt_tokens` in this scope
+   --> src/inference.rs:325:33
+    |
+325 |         session.total_tokens += prompt_tokens + tokens_generated;
+    |                                 ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `prompt_tokens` in this scope
+   --> src/inference.rs:330:13
+    |
+330 |             prompt_tokens,
+    |             ^^^^^^^^^^^^^ not found in this scope
+
+warning: unused import: `warn`
+ --> src/hive.rs:9:28
+  |
+9 | use tracing::{info, error, warn};
+  |                            ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `TetMesh`
+ --> src/mesh_worker.rs:3:32
+  |
+3 | use crate::mesh::{MeshMessage, TetMesh};
+  |                                ^^^^^^^
+
+warning: unused import: `Path`
+ --> src/registry.rs:2:17
+  |
+2 | use std::path::{Path, PathBuf};
+  |                 ^^^^
+
+warning: use of deprecated enum `llama_cpp_2::model::Special`: This enum is a mixture of options for llama cpp providing less flexibility it only used with deprecated methods and will be removed in the future.
+   --> src/llama_engine.rs:149:96
+    |
+149 |                 let token_bytes = model.token_to_piece_bytes(new_token_id, llama_cpp_2::model::Special::from(false))
+    |                                                                                                ^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+error[E0599]: no method named `with_seed` found for struct `LlamaContextParams` in the current scope
+  --> src/llama_engine.rs:98:37
+   |
+98 |             ctx_params = ctx_params.with_seed(req_clone.deterministic_seed as u32);
+   |                                     ^^^^^^^^^ method not found in `LlamaContextParams`
+
+error[E0599]: no method named `sample_token_greedy` found for struct `LlamaContext<'a>` in the current scope
+   --> src/llama_engine.rs:143:40
+    |
+143 |                 let new_token_id = ctx.sample_token_greedy(candidates_p);
+    |                                        ^^^^^^^^^^^^^^^^^^^ method not found in `LlamaContext<'_>`
+
+error[E0308]: mismatched types
+   --> src/llama_engine.rs:149:110
+    |
+149 |                 let token_bytes = model.token_to_piece_bytes(new_token_id, llama_cpp_2::model::Special::from(false))
+    |                                                                            --------------------------------- ^^^^^ expected `Special`, found `bool`
+    |                                                                            |
+    |                                                                            arguments to this function are incorrect
+    |
+note: associated function defined here
+   --> /rustc/ded5c06cf21d2b93bffd5d884aa6e96934ee4234/library/core/src/convert/mod.rs:592:8
+
+error[E0061]: this method takes 4 arguments but 2 arguments were supplied
+   --> src/llama_engine.rs:149:41
+    |
+149 |                 let token_bytes = model.token_to_piece_bytes(new_token_id, llama_cpp_2::model::Special::from(false))
+    |                                         ^^^^^^^^^^^^^^^^^^^^--------------------------------------------------------
+    |                                                             |              |
+    |                                                             |              expected `usize`, found `Special`
+    |                                                             two arguments of type `bool` and `std::option::Option<NonZero<u16>>` are missing
+    |
+note: method defined here
+   --> /Users/kevin/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/llama-cpp-2-0.1.141/src/model.rs:476:12
+    |
+476 |     pub fn token_to_piece_bytes(
+    |            ^^^^^^^^^^^^^^^^^^^^
+help: provide the arguments
+    |
+149 -                 let token_bytes = model.token_to_piece_bytes(new_token_id, llama_cpp_2::model::Special::from(false))
+149 +                 let token_bytes = model.token_to_piece_bytes(new_token_id, /* usize */, /* bool */, /* std::option::Option<NonZero<u16>> */)
+    |
+
+error[E0599]: no method named `get_all_sessions` found for struct `ModelRegistry` in the current scope
+   --> src/llama_engine.rs:213:38
+    |
+213 |         let sessions = self.registry.get_all_sessions().await;
+    |                                      ^^^^^^^^^^^^^^^^
+    |
+   ::: src/inference.rs:166:1
+    |
+166 | pub struct ModelRegistry {
+    | ------------------------ method `get_all_sessions` not found for this struct
+    |
+help: there is a method `serialize_sessions` with a similar name
+    |
+213 -         let sessions = self.registry.get_all_sessions().await;
+213 +         let sessions = self.registry.serialize_sessions().await;
+    |
+
+error[E0282]: type annotations needed
+   --> src/llama_engine.rs:213:13
+    |
+213 |         let sessions = self.registry.get_all_sessions().await;
+    |             ^^^^^^^^
+214 |         sessions.into_iter().find(|s| s.session_id == session_id)
+    |         -------- type must be known at this point
+    |
+help: consider giving `sessions` an explicit type
+    |
+213 |         let sessions: /* Type */ = self.registry.get_all_sessions().await;
+    |                     ++++++++++++
+
+Some errors have detailed explanations: E0061, E0282, E0308, E0425, E0599.
+For more information about an error, try `rustc --explain E0061`.
+warning: `tet-core` (lib) generated 4 warnings
+error: could not compile `tet-core` (lib) due to 10 previous errors; 4 warnings emitted

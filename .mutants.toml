@@ -1,0 +1,18 @@
+# cargo-mutants configuration for Trytet
+# Run with: cargo mutants -f src/ --in-place
+
+# Only examine these source trees (exclude WASM cartridge crates)
+examine = [
+    "src/",
+]
+
+# Files to exclude from mutation testing
+exclude = [
+    "src/bin/",              # CLI binaries, hard to unit test
+]
+
+# Timeout per mutant test (seconds)
+timeout = 30
+
+# Fail if any mutants survive
+fail_on_mutants = true

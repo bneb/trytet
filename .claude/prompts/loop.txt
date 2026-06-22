@@ -1,0 +1,12 @@
+Read .claude/prompts/ralph-feature-realization.md for the full specification. Implement the next unfinished item, apply it surgically, then run `cargo check` and `cargo clippy --all-targets -- -D warnings` to verify. When all 8 gates pass (build, test, clippy, fmt, 8 MCP tools, tet up server, tet ps, tet doctor), report completion and stop.
+
+Constraints: no new deps, no new modules unless essential, no TetSandbox trait changes, no cartridge crate changes, no test file changes (except assertion fixes), no AI-speak, no TODO comments.
+
+Quality baseline: every change must pass `cargo check` and `cargo clippy --all-targets -- -D warnings` before considering the item done. If a command cannot be implemented without external infrastructure, mark it as unimplemented with a clean exit message — do not leave broken stubs.
+
+Auto-pace: fire when you have a concrete change to apply. After implementing, verify with cargo check + clippy, then re-fire if gates remain. If stuck on an issue for more than 2 consecutive iterations without making a different change, escalate the specific blocker.
+
+Final gate check script:
+```bash
+cargo build --release --bin tet && cargo test --release && cargo clippy --all-targets -- -D warnings && cargo fmt --check --all && echo "GATES 1-4 PASS" && ./target/release/tet mcp --list-tools 2>&1 | grep -c "trytet_" && echo "GATE 5: 8 tools expected" && timeout 2 ./target/release/tet up 2>&1 | head -5 && echo "GATE 6: server starts" && ./target/release/tet ps 2>&1 && echo "GATE 7: ps works" && ./target/release/tet doctor 2>&1 | head -3 && echo "GATE 8: doctor works"
+```

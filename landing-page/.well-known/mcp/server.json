@@ -1,0 +1,13 @@
+{
+  "name": "trytet",
+  "description": "Wasm sandbox runtime for AI agent code execution — fuel-metered, deterministic traps, MCP-native",
+  "vendor": "Trytet",
+  "source": "https://github.com/bneb/trytet",
+  "homepage": "https://trytet.io",
+  "license": "MIT",
+  "runtime": "Rust",
+  "protocolVersion": "2024-11-05",
+  "capabilities": {
+    "tools": true
+  }
+}

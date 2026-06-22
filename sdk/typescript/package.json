@@ -1,0 +1,23 @@
+{
+  "name": "trytet-client",
+  "version": "0.2.0",
+  "description": "Official TypeScript SDK for the Trytet Engine — Wasm sandbox for AI agents",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["trytet", "wasm", "agent", "llm", "sandbox", "mcp"],
+  "author": "Trytet",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bneb/trytet"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {}
+}
